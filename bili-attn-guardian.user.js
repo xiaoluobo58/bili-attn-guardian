@@ -392,16 +392,49 @@
         });
     };
 
+
     // ==========================================
-    // 🛡️ 遮罩 UI 逻辑
+    // 🛡️ 遮罩 UI 逻辑 (新增初审占位符)
     // ==========================================
+    const showPendingMask = () => {
+        injectM3Style();
+        let mask = document.getElementById('ai-focus-mask');
+        if (!mask) {
+            mask = document.createElement('div');
+            mask.id = 'ai-focus-mask';
+            mask.className = 'm3-overlay';
+            document.body.appendChild(mask);
+        }
+
+        // 使用你原生的 UI 框架，但填入等待状态的文案
+        mask.innerHTML = `
+            <div class="m3-card">
+                <h2 class="m3-title">哔哩哔哩审判庭</h2>
+                <div class="m3-chip" style="background-color: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant);">审查中...</div>
+                <p class="m3-desc" style="text-align: center;">AI 审判官正在查阅该视频的卷宗，请稍候...</p>
+            </div>
+        `;
+        setTimeout(() => mask.classList.add('show'), 10);
+
+        // 【核心】瞬发暴力暂停循环，防止B站异步视频在底层悄悄播放
+        if (!window.pauseInterval) {
+            window.pauseInterval = setInterval(() => {
+                const videoEle = document.querySelector('video');
+                if (videoEle && !videoEle.paused) videoEle.pause();
+            }, 100); // 每秒锁10次，绝对插翅难飞
+        }
+    };
+
     const showBlocker = (category, title, desc, tags) => {
         injectM3Style();
-        if (document.getElementById('ai-focus-mask')) return;
-
-        const mask = document.createElement('div');
-        mask.id = 'ai-focus-mask';
-        mask.className = 'm3-overlay';
+        // 修复：不要直接 return，而是复用刚才弹出的等待遮罩，直接替换里面的内容
+        let mask = document.getElementById('ai-focus-mask');
+        if (!mask) {
+            mask = document.createElement('div');
+            mask.id = 'ai-focus-mask';
+            mask.className = 'm3-overlay';
+            document.body.appendChild(mask);
+        }
 
         let reasonText = CATEGORY_MAP[category] || "未授权分类";
 
@@ -426,11 +459,7 @@
                 </div>
             </div>
         `;
-        document.body.appendChild(mask);
         setTimeout(() => mask.classList.add('show'), 10);
-
-        const videoEle = document.querySelector('video');
-        if (videoEle) videoEle.pause();
 
         const btnGoBack = document.getElementById('m3-go-back');
         const actionsInitial = document.getElementById('m3-initial-actions');
@@ -481,6 +510,8 @@
                     showToast("审判结束。您的复议请求已被通过", "success");
                     mask.classList.remove('show');
                     setTimeout(() => mask.remove(), 300);
+                    // 点击复议通过后，恢复视频播放
+                    const videoEle = document.querySelector('video');
                     if (videoEle) videoEle.play();
                 } else {
                     let rejectMessage = appealResult.split('|')[1] || appealResult.replace(/REJECTED/i, '').trim();
@@ -546,11 +577,12 @@
     const main = async () => {
         const processId = ++currentProcessId;
 
+        // 这里保留 1500ms 等待，是为了确保 B 站把标题等数据渲染出来
         await new Promise(r => setTimeout(r, 1500));
         if (processId !== currentProcessId) return;
 
         const { title, desc, tags } = getVideoInfo();
-        if (!title) return;
+        if (!title) return; // 如果还没加载出标题，下一次 observer 会重新触发 main
 
         console.log(`[哔哩哔哩审判庭] 捕获视频: ${title}`);
         console.log(`[哔哩哔哩审判庭] 捕获简介: ${desc ? desc.substring(0, 50) + '...' : '无简介'}`);
@@ -566,19 +598,41 @@
             const isVisaApproved = ALLOWED_CATEGORIES.includes(category);
 
             if (isVisaApproved) {
+                // 如果通过审查，必须清除我们设置的“死循环暂停”
+                if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
+
                 const cnName = CATEGORY_MAP[category] || category;
                 showToast(`临时访问签注已通过 [${cnName}]`, "success");
+
+                // 移除“审查中”遮罩，并恢复播放
+                const mask = document.getElementById('ai-focus-mask');
+                if (mask) {
+                    mask.classList.remove('show');
+                    setTimeout(() => mask.remove(), 300);
+                }
+                const videoEle = document.querySelector('video');
+                if (videoEle) videoEle.play();
+
             } else {
+                // 如果被驳回，清除循环（因为即将调用你的拦截界面）
+                if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
                 showBlocker(category, title, desc, tags);
             }
 
         } catch (error) {
-            if (processId === currentProcessId) console.error("[哔哩哔哩审判庭] 流程终止:", error);
+            if (processId === currentProcessId) {
+                console.error("[哔哩哔哩审判庭] 流程终止:", error);
+                // 出现网络错误时，也要清除暂停，移除遮罩，避免彻底卡死
+                if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
+                const mask = document.getElementById('ai-focus-mask');
+                if (mask) mask.remove();
+            }
         }
     };
 
     let debounceTimer = null;
     const triggerMainDebounced = () => {
+        showPendingMask(); // 【核心改动】抛弃延迟，任何风吹草动立马拉起遮罩和视频暂停！
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => main(), 1000);
     };
@@ -587,11 +641,18 @@
 
     new MutationObserver(() => {
         const currentVideoId = extractVideoId(location.href);
-        if (currentVideoId && currentVideoId !== lastVideoId) {
+        if (currentVideoId !== lastVideoId) {
             lastVideoId = currentVideoId;
+
+            // 路由发生跳转时，清理上一个视频留下的烂摊子
             const existingMask = document.getElementById('ai-focus-mask');
             if (existingMask) existingMask.remove();
-            triggerMainDebounced();
+            if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
+
+            // 如果跳转到了新的视频页，重新触发审查
+            if (currentVideoId) {
+                triggerMainDebounced();
+            }
         }
     }).observe(document, {subtree: true, childList: true});
 
