@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.2.0
+// @version      1.2.1
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(Gemini)
 // @match        *://*.bilibili.com/video/*
@@ -112,13 +112,13 @@
                 <div class="m3-input-group" style="margin-bottom: 12px;">
                     <label class="group-title">允许无条件通过的分类 (不限时)：</label>
                     <div class="m3-checkbox-group" style="padding: 12px;">
-                        <label class="m3-checkbox-label"><input type="checkbox" value="ACADEMIC" class="m3-cat-cb" ${isChecked('ACADEMIC')}> 学术类 </label>
-                        <label class="m3-checkbox-label"><input type="checkbox" value="PRACTICAL" class="m3-cat-cb" ${isChecked('PRACTICAL')}> 实用类 </label>
-                        <label class="m3-checkbox-label"><input type="checkbox" value="GAME_GUIDE" class="m3-cat-cb" ${isChecked('GAME_GUIDE')}> 有意义游戏类 </label>
-                        <label class="m3-checkbox-label"><input type="checkbox" value="TECH_REVIEW" class="m3-cat-cb" ${isChecked('TECH_REVIEW')}> 科技评测 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="ACADEMIC" class="m3-cat-cb" ${isChecked('ACADEMIC')}> 学术类视频 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="PRACTICAL" class="m3-cat-cb" ${isChecked('PRACTICAL')}> 实用类视频 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="GAME_GUIDE" class="m3-cat-cb" ${isChecked('GAME_GUIDE')}> 有意义游戏视频 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="TECH_REVIEW" class="m3-cat-cb" ${isChecked('TECH_REVIEW')}> 科技数码评测视频 </label>
                         <label class="m3-checkbox-label"><input type="checkbox" value="MUSIC" class="m3-cat-cb" ${isChecked('MUSIC')}> 音乐放松 </label>
-                        <label class="m3-checkbox-label"><input type="checkbox" value="HIJACKING" class="m3-cat-cb" ${isChecked('HIJACKING')}> 无意义注意力劫持 (Meme/娱乐)</label>
-                        <label class="m3-checkbox-label"><input type="checkbox" value="TOXIC" class="m3-cat-cb" ${isChecked('TOXIC')}> 煽动对立 (引战/键政等)</label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="HIJACKING" class="m3-cat-cb" ${isChecked('HIJACKING')}> 无意义注意力劫持、MEME</label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="TOXIC" class="m3-cat-cb" ${isChecked('TOXIC')}> 煽动对立、引战</label>
                     </div>
                 </div>
 
@@ -291,6 +291,8 @@
                 const appealResult = await appealVideoWithAI(title, desc, tags, input.value.trim());
                 if (appealResult.toUpperCase().startsWith('APPROVED')) {
                     GM_setValue(`ai_focus_cache_${extractVideoId(location.href)}`, 'APPROVED_BY_APPEAL');
+                    // 【修复2】：复议通过后，必须把锁死定时器关掉，否则视频放行后会鬼畜暂停！
+                    if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
                     showToast("复议通过", "success"); mask.classList.remove('show'); setTimeout(() => mask.remove(), 300);
                     const v = document.querySelector('video'); if (v) v.play();
                 } else {
@@ -370,14 +372,18 @@
 
             if (isVisaApproved) {
                 if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
-                showToast(`临时签注通过`, "success");
+                showToast(`访问权限已验证：临时通行签证`, "success");
                 const mask = document.getElementById('ai-focus-mask');
                 if (mask) { mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); }
                 const videoEle = document.querySelector('video'); if (videoEle) videoEle.play();
             } else {
-                if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
+                // 【修复1】：如果是拦截状态，绝对不能清除定时器，还要确保它在后台死循环锁住视频！
+                if (!window.pauseInterval) { 
+                    window.pauseInterval = setInterval(() => { const v = document.querySelector('video'); if (v && !v.paused) v.pause(); }, 100); 
+                }
                 showBlocker(category, title, desc, tags);
             }
+
         } catch (error) {
             if (processId === currentProcessId) {
                 if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
