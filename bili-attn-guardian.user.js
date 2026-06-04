@@ -110,21 +110,24 @@
                 <h2 class="m3-title">审判庭签证配置</h2>
                 
                 <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">允许无条件通过的分类：</label>
+                    <label class="group-title">允许无条件通过的分类 (不限时)：</label>
                     <div class="m3-checkbox-group" style="padding: 12px;">
-                        <label class="m3-checkbox-label"><input type="checkbox" value="ACADEMIC" class="m3-cat-cb" ${isChecked('ACADEMIC')}> 学术类</label>
-                        <label class="m3-checkbox-label"><input type="checkbox" value="PRACTICAL" class="m3-cat-cb" ${isChecked('PRACTICAL')}> 实用类</label>
-                        <label class="m3-checkbox-label"><input type="checkbox" value="GAME_GUIDE" class="m3-cat-cb" ${isChecked('GAME_GUIDE')}> 游戏硬核教程</label>
-                        <label class="m3-checkbox-label"><input type="checkbox" value="TECH_REVIEW" class="m3-cat-cb" ${isChecked('TECH_REVIEW')}> 科技硬件评测</label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="ACADEMIC" class="m3-cat-cb" ${isChecked('ACADEMIC')}> 学术类 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="PRACTICAL" class="m3-cat-cb" ${isChecked('PRACTICAL')}> 实用类 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="GAME_GUIDE" class="m3-cat-cb" ${isChecked('GAME_GUIDE')}> 有意义游戏类 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="TECH_REVIEW" class="m3-cat-cb" ${isChecked('TECH_REVIEW')}> 科技评测 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="MUSIC" class="m3-cat-cb" ${isChecked('MUSIC')}> 音乐放松 </label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="HIJACKING" class="m3-cat-cb" ${isChecked('HIJACKING')}> 无意义注意力劫持 (Meme/娱乐)</label>
+                        <label class="m3-checkbox-label"><input type="checkbox" value="TOXIC" class="m3-cat-cb" ${isChecked('TOXIC')}> 煽动对立 (引战/键政等)</label>
                     </div>
                 </div>
 
                 <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
-                    <label class="group-title">🎵 音乐签证单次时长 (N分钟, 1-10)：</label>
+                    <label class="group-title">🎵 音乐签证单次时长 (1-10，分钟)：</label>
                     <input type="number" id="m3-cfg-music-duration" value="${VISA_CONFIG.duration}" min="1" max="10">
                 </div>
                 <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">⏳ 音乐签证冷却时间 (M分钟)：</label>
+                    <label class="group-title">⏳ 音乐签证冷却时间 (分钟)：</label>
                     <input type="number" id="m3-cfg-music-cooldown" value="${VISA_CONFIG.cooldown}" min="1">
                 </div>
 
