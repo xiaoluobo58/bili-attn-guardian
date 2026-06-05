@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.2.2
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
-// @author       Misaka Milobo(Gemini)
+// @author       Misaka Milobo(By Gemini)
 // @match        *://*.bilibili.com/video/*
 // @homepageURL  https://www.milobo.moe
 // @updateURL    https://raw.githubusercontent.com/xiaoluobo58/bili-attn-guardian/main/bili-attn-guardian.user.js
