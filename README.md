@@ -1,5 +1,5 @@
 # 哔哩哔哩审判庭
-## Bilibili Attention Guardian
+#### Bilibili Attention Guardian
 这是一个由本人提供IDEA与架构设计+LLM编写的油猴脚本  
 在利用B站的网课资源学习时，我们的注意力俱乐部被其他娱乐视频所劫持  
 本插件正是为了解决这个问题而诞生。通过抽象标题、简介和TAG发送给AI API判断，起到智能拦截娱乐视频的效果，并支持自定义拦截的视频类型  
