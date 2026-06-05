@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.2.1
+// @version      1.2.2
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(Gemini)
 // @match        *://*.bilibili.com/video/*
@@ -372,7 +372,7 @@
 
             if (isVisaApproved) {
                 if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
-                showToast(`访问权限已验证：临时通行签证`, "success");
+                showToast(`允许通行`, "success");
                 const mask = document.getElementById('ai-focus-mask');
                 if (mask) { mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); }
                 const videoEle = document.querySelector('video'); if (videoEle) videoEle.play();
