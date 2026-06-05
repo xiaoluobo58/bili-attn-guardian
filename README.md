@@ -2,20 +2,23 @@
 #### Bilibili Attention Guardian
 
 ![项目截图](./assets/snap-loading.png)
+![项目截图](./assets/snap-fangxin.png)
 
 这是一个由本人提供IDEA与架构设计+LLM编写的油猴脚本  
 在利用B站的网课资源学习时，我们的注意力总会被其他娱乐视频所劫持  
 本插件正是为了解决这个问题而诞生。通过抓取视频标题、简介和TAG发送给AI API判断，起到智能拦截娱乐视频的效果。并支持自定义拦截与放行的视频类型  
 
-## 智能拦截
+## 特性
+
+### 智能拦截
 
 ![项目截图](./assets/snap-block.png)
 
-## 自定义选项
+### 自定义选项
 
 ![项目截图](./assets/snap-config.png)
 
-## 临时签证-适当放松
+### 临时签证-适当放松
 
 ![项目截图](./assets/snap-relax.png)
 ![项目截图](./assets/snap-relax2.png)
