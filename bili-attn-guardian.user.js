@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.2.4
-// @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。(已修复定时器与分P缓存BUG)
+// @version      1.2.5
+// @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini)
 // @match        *://*.bilibili.com/video/*
 // @homepageURL  https://www.milobo.moe
@@ -42,7 +42,7 @@
     };
 
     // ==========================================
-    // 🎬 播放器控制封装 (修复抓错标签与播放报错)
+    // 🎬 播放器控制封装 
     // ==========================================
     const getMainVideoElement = () => document.querySelector('.bpx-player-video-area video') || document.querySelector('video');
 
@@ -56,7 +56,7 @@
         if (v && v.paused) {
             const playPromise = v.play();
             if (playPromise !== undefined) {
-                playPromise.catch(e => console.log("[哔哩哔哩审判庭] 浏览器阻止了自动播放，需用户手动点击", e));
+                playPromise.catch(e => console.log("[哔哩哔哩审判庭] 浏览器阻止了自动播放，需用户手动点击"));
             }
         }
     };
@@ -115,7 +115,7 @@
     };
 
     // ==========================================
-    // ⚙️ 设置面板
+    // ⚙️ 设置面板 (支持拉取云端模型列表)
     // ==========================================
     const openSettings = () => {
         injectM3Style();
@@ -153,20 +153,97 @@
                     <label class="group-title">API Key</label><input type="password" id="m3-cfg-key" value="${currentApi.key}" placeholder="sk-...">
                 </div>
                 <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">API Endpoint</label><input type="text" id="m3-cfg-endpoint" value="${currentApi.endpoint}">
+                    <label class="group-title">API Endpoint (如: https://api.openai.com/v1/chat/completions)</label><input type="text" id="m3-cfg-endpoint" value="${currentApi.endpoint}">
                 </div>
+                
                 <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">Model</label><input type="text" id="m3-cfg-model" value="${currentApi.model}">
+                    <label class="group-title">Model (大语言模型)</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="m3-cfg-model" value="${currentApi.model}" list="m3-model-list" style="flex: 1;" placeholder="手动输入或点击右侧拉取">
+                        <button class="m3-button tonal" id="m3-cfg-fetch-models" style="margin: 0; padding: 0 16px; flex-shrink: 0;">拉取列表</button>
+                    </div>
+                    <datalist id="m3-model-list"></datalist>
                 </div>
+
                 <div style="margin-top: 16px; display: flex; justify-content: center;"><button class="m3-button tonal" id="m3-cfg-cancel">取消</button><button class="m3-button primary" id="m3-cfg-save">保存配置</button></div>
             </div>
         `;
         document.body.appendChild(mask);
         setTimeout(() => mask.classList.add('show'), 10);
+        
         document.getElementById('m3-cfg-cancel').onclick = () => { mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); };
+        
+        // --- 拉取模型列表核心逻辑 ---
+        document.getElementById('m3-cfg-fetch-models').onclick = () => {
+            const key = document.getElementById('m3-cfg-key').value.trim();
+            const endpoint = document.getElementById('m3-cfg-endpoint').value.trim();
+            const btn = document.getElementById('m3-cfg-fetch-models');
+
+            if (!key || !endpoint) return showToast("请先填写 API Key 和 Endpoint", "error");
+
+            // 智能推导 models 接口地址 (将 /chat/completions 替换为 /models)
+            let modelsUrl = endpoint.replace(/\/chat\/completions\/?$/i, '/models');
+
+            btn.innerText = "拉取中...";
+            btn.disabled = true;
+
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: modelsUrl,
+                headers: {
+                    "Authorization": `Bearer ${key}`,
+                    "Content-Type": "application/json"
+                },
+                onload: function(response) {
+                    btn.innerText = "拉取列表";
+                    btn.disabled = false;
+                    if (response.status === 200) {
+                        try {
+                            const resJson = JSON.parse(response.responseText);
+                            const models = resJson.data || [];
+                            if (models.length === 0) return showToast("拉取成功，但该供应商模型列表为空", "error");
+
+                            const datalist = document.getElementById('m3-model-list');
+                            datalist.innerHTML = ''; // 清空旧列表
+                            
+                            // 解析并填充选项
+                            models.forEach(m => {
+                                if (m.id) {
+                                    const option = document.createElement('option');
+                                    option.value = m.id;
+                                    datalist.appendChild(option);
+                                }
+                            });
+                            
+                            showToast(`✅ 成功获取 ${models.length} 个模型！请点击输入框下拉选择。`, "success");
+                            
+                            // 自动将焦点放回输入框，并触发点击效果方便展开下拉
+                            const modelInput = document.getElementById('m3-cfg-model');
+                            modelInput.value = ""; // 清空当前方便下拉
+                            modelInput.focus();
+                            modelInput.click();
+
+                        } catch (e) {
+                            showToast("解析数据失败，API 格式不兼容标准规范", "error");
+                        }
+                    } else {
+                        showToast(`拉取失败，状态码: ${response.status}`, "error");
+                    }
+                },
+                onerror: function() {
+                    btn.innerText = "拉取列表";
+                    btn.disabled = false;
+                    showToast("网络请求失败，请检查网络或跨域限制", "error");
+                }
+            });
+        };
+
+        // --- 保存逻辑 ---
         document.getElementById('m3-cfg-save').onclick = () => {
             const newKey = document.getElementById('m3-cfg-key').value.trim();
+            const newModel = document.getElementById('m3-cfg-model').value.trim();
             if (!newKey) return showToast("API Key 不能为空", "error");
+            if (!newModel) return showToast("模型名称不能为空", "error");
             
             let nVal = parseInt(document.getElementById('m3-cfg-music-duration').value) || 5;
             if (nVal < 1) nVal = 1; if (nVal > 10) nVal = 10;
@@ -180,7 +257,7 @@
             GM_setValue('ai_focus_music_cooldown', mVal);
             GM_setValue('ai_focus_key', newKey); 
             GM_setValue('ai_focus_endpoint', document.getElementById('m3-cfg-endpoint').value.trim()); 
-            GM_setValue('ai_focus_model', document.getElementById('m3-cfg-model').value.trim());
+            GM_setValue('ai_focus_model', newModel);
             
             mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); showToast("配置已保存", "success");
         };
@@ -323,14 +400,13 @@
     };
 
     // ==========================================
-    // 🔍 信息提取器 (修复分P视频的缓存冲突)
+    // 🔍 信息提取器 
     // ==========================================
     const extractVideoId = (url) => {
         try { 
             const urlObj = new URL(url);
             const match = urlObj.pathname.match(/\/video\/(BV\w+|av\d+)/i); 
             if (!match) return null;
-            // 考虑分P的情况，防止不同P共用同一缓存
             const p = urlObj.searchParams.get('p') || '1';
             return `${match[1]}_p${p}`;
         } catch(e) { return null; }
@@ -361,7 +437,6 @@
         if (!info.title || processId !== currentProcessId) return;
         const { title, desc, tags } = info;
 
-        // 动态获取最新配置，防多开标签页状态不同步
         const allowedCats = getAllowedCategories();
         const visaCfg = getVisaConfig();
 
@@ -434,7 +509,6 @@
             lastVideoId = currentVideoId;
             const existingMask = document.getElementById('ai-focus-mask'); if (existingMask) existingMask.remove();
             
-            // 核心修复：切P或切视频时，必须清空上个视频遗留的暂停锁和定时炸弹
             if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
             if (window.musicTimer) { clearTimeout(window.musicTimer); window.musicTimer = null; } 
             
