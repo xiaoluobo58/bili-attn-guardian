@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.2.6
+// @version      1.2.7
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini)
 // @match        *://*.bilibili.com/video/*
@@ -56,9 +56,6 @@
     const normalizeText = (text) => (text || '').replace(/\s+/g, ' ').trim();
     const uniqueJoin = (items) => Array.from(new Set(items.map(normalizeText).filter(Boolean))).join(', ');
     const appendUiElement = (element) => (document.body || document.documentElement).appendChild(element);
-
-    window.addEventListener('error', event => logError('脚本运行错误', event.error || event.message));
-    window.addEventListener('unhandledrejection', event => logError('未处理的 Promise 异常', event.reason));
 
     // ==========================================
     // 🎬 播放器控制封装 
