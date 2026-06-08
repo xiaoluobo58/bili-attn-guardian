@@ -1,13 +1,11 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.2.3
-// @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
+// @version      1.2.4
+// @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。(已修复定时器与分P缓存BUG)
 // @author       Misaka Milobo(By Gemini)
 // @match        *://*.bilibili.com/video/*
 // @homepageURL  https://www.milobo.moe
-// @updateURL    https://raw.githubusercontent.com/xiaoluobo58/bili-attn-guardian/main/bili-attn-guardian.user.js
-// @downloadURL  https://raw.githubusercontent.com/xiaoluobo58/bili-attn-guardian/main/bili-attn-guardian.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_setValue
@@ -22,26 +20,45 @@
     'use strict';
 
     // ==========================================
-    // ⚙️ 配置读取 (通过油猴存储)
+    // ⚙️ 配置与状态 (动态获取以支持多标签页同步)
     // ==========================================
-    let API_CONFIG = {
+    const getApiConfig = () => ({
         key: GM_getValue('ai_focus_key', ''),
         endpoint: GM_getValue('ai_focus_endpoint', 'https://api.openai.com/v1/chat/completions'),
         model: GM_getValue('ai_focus_model', 'gpt-4o-mini') 
-    };
+    });
 
-    let ALLOWED_CATEGORIES = GM_getValue('ai_focus_allowed_categories', ['ACADEMIC', 'PRACTICAL', 'GAME_GUIDE', 'TECH_REVIEW']);
+    const getAllowedCategories = () => GM_getValue('ai_focus_allowed_categories', ['ACADEMIC', 'PRACTICAL', 'GAME_GUIDE', 'TECH_REVIEW']);
 
-    // 🎸 音乐签证专属配置
-    let VISA_CONFIG = {
-        duration: GM_getValue('ai_focus_music_duration', 5), // N: 每次听歌 N 分钟 (1-10)
-        cooldown: GM_getValue('ai_focus_music_cooldown', 60) // M: 冷却时间 M 分钟
-    };
+    const getVisaConfig = () => ({
+        duration: GM_getValue('ai_focus_music_duration', 5), 
+        cooldown: GM_getValue('ai_focus_music_cooldown', 60) 
+    });
 
     const CATEGORY_MAP = {
         'ACADEMIC': '学术类视频', 'PRACTICAL': '实用类视频', 'GAME_GUIDE': '有意义的游戏视频',
         'TECH_REVIEW': '科技评测', 'HIJACKING': '无意义注意力劫持', 'TOXIC': '煽动对立内容',
         'MUSIC': '音乐放松'
+    };
+
+    // ==========================================
+    // 🎬 播放器控制封装 (修复抓错标签与播放报错)
+    // ==========================================
+    const getMainVideoElement = () => document.querySelector('.bpx-player-video-area video') || document.querySelector('video');
+
+    const forcePauseVideo = () => {
+        const v = getMainVideoElement();
+        if (v && !v.paused) v.pause();
+    };
+
+    const tryPlayVideo = () => {
+        const v = getMainVideoElement();
+        if (v && v.paused) {
+            const playPromise = v.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(e => console.log("[哔哩哔哩审判庭] 浏览器阻止了自动播放，需用户手动点击", e));
+            }
+        }
     };
 
     // ==========================================
@@ -98,17 +115,20 @@
     };
 
     // ==========================================
-    // ⚙️ 设置面板 (增加音乐签证配置)
+    // ⚙️ 设置面板
     // ==========================================
     const openSettings = () => {
         injectM3Style();
         if (document.getElementById('m3-settings-mask')) return;
-        const isChecked = (val) => ALLOWED_CATEGORIES.includes(val) ? 'checked' : '';
+        const currentAllowed = getAllowedCategories();
+        const currentVisa = getVisaConfig();
+        const currentApi = getApiConfig();
+
+        const isChecked = (val) => currentAllowed.includes(val) ? 'checked' : '';
         const mask = document.createElement('div'); mask.id = 'm3-settings-mask'; mask.className = 'm3-overlay';
         mask.innerHTML = `
             <div class="m3-card" style="max-height: 95vh;">
                 <h2 class="m3-title">审判庭签证配置</h2>
-                
                 <div class="m3-input-group" style="margin-bottom: 12px;">
                     <label class="group-title">允许无条件通过的分类 (不限时)：</label>
                     <div class="m3-checkbox-group" style="padding: 12px;">
@@ -121,24 +141,22 @@
                         <label class="m3-checkbox-label"><input type="checkbox" value="TOXIC" class="m3-cat-cb" ${isChecked('TOXIC')}> 煽动对立、引战</label>
                     </div>
                 </div>
-
                 <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
                     <label class="group-title">🎵 音乐签证单次时长 (1-10，分钟)：</label>
-                    <input type="number" id="m3-cfg-music-duration" value="${VISA_CONFIG.duration}" min="1" max="10">
+                    <input type="number" id="m3-cfg-music-duration" value="${currentVisa.duration}" min="1" max="10">
                 </div>
                 <div class="m3-input-group" style="margin-bottom: 12px;">
                     <label class="group-title">⏳ 音乐签证冷却时间 (分钟)：</label>
-                    <input type="number" id="m3-cfg-music-cooldown" value="${VISA_CONFIG.cooldown}" min="1">
+                    <input type="number" id="m3-cfg-music-cooldown" value="${currentVisa.cooldown}" min="1">
                 </div>
-
                 <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
-                    <label class="group-title">API Key</label><input type="password" id="m3-cfg-key" value="${API_CONFIG.key}" placeholder="sk-...">
+                    <label class="group-title">API Key</label><input type="password" id="m3-cfg-key" value="${currentApi.key}" placeholder="sk-...">
                 </div>
                 <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">API Endpoint</label><input type="text" id="m3-cfg-endpoint" value="${API_CONFIG.endpoint}">
+                    <label class="group-title">API Endpoint</label><input type="text" id="m3-cfg-endpoint" value="${currentApi.endpoint}">
                 </div>
                 <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">Model</label><input type="text" id="m3-cfg-model" value="${API_CONFIG.model}">
+                    <label class="group-title">Model</label><input type="text" id="m3-cfg-model" value="${currentApi.model}">
                 </div>
                 <div style="margin-top: 16px; display: flex; justify-content: center;"><button class="m3-button tonal" id="m3-cfg-cancel">取消</button><button class="m3-button primary" id="m3-cfg-save">保存配置</button></div>
             </div>
@@ -150,37 +168,38 @@
             const newKey = document.getElementById('m3-cfg-key').value.trim();
             if (!newKey) return showToast("API Key 不能为空", "error");
             
-            // 处理音乐签证数据，防止乱填
             let nVal = parseInt(document.getElementById('m3-cfg-music-duration').value) || 5;
             if (nVal < 1) nVal = 1; if (nVal > 10) nVal = 10;
             let mVal = parseInt(document.getElementById('m3-cfg-music-cooldown').value) || 60;
             if (mVal < 1) mVal = 1;
 
             const newAllowed = Array.from(document.querySelectorAll('.m3-cat-cb')).filter(cb => cb.checked).map(cb => cb.value);
-            GM_setValue('ai_focus_allowed_categories', newAllowed); ALLOWED_CATEGORIES = newAllowed;
             
-            GM_setValue('ai_focus_music_duration', nVal); GM_setValue('ai_focus_music_cooldown', mVal);
-            VISA_CONFIG = { duration: nVal, cooldown: mVal };
-
-            GM_setValue('ai_focus_key', newKey); GM_setValue('ai_focus_endpoint', document.getElementById('m3-cfg-endpoint').value.trim()); GM_setValue('ai_focus_model', document.getElementById('m3-cfg-model').value.trim());
-            API_CONFIG = { key: newKey, endpoint: document.getElementById('m3-cfg-endpoint').value.trim(), model: document.getElementById('m3-cfg-model').value.trim() };
+            GM_setValue('ai_focus_allowed_categories', newAllowed); 
+            GM_setValue('ai_focus_music_duration', nVal); 
+            GM_setValue('ai_focus_music_cooldown', mVal);
+            GM_setValue('ai_focus_key', newKey); 
+            GM_setValue('ai_focus_endpoint', document.getElementById('m3-cfg-endpoint').value.trim()); 
+            GM_setValue('ai_focus_model', document.getElementById('m3-cfg-model').value.trim());
+            
             mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); showToast("配置已保存", "success");
         };
     };
     GM_registerMenuCommand("配置 AI 专注 API 与分类", openSettings);
 
     // ==========================================
-    // 🧠 AI 判断逻辑 (增加 MUSIC 分类)
+    // 🧠 AI 判断逻辑
     // ==========================================
     const checkVideoWithAI = (title, desc, tags, retryCount = 1) => {
         return new Promise((resolve, reject) => {
-            if (!API_CONFIG.key) { showToast("未配置 API Key", "error"); openSettings(); return reject("Missing API Key"); }
+            const api = getApiConfig();
+            if (!api.key) { showToast("未配置 API Key", "error"); openSettings(); return reject("Missing API Key"); }
             const prompt = `分析以下视频将其分类为7种之一：ACADEMIC, PRACTICAL, GAME_GUIDE, TECH_REVIEW, HIJACKING, TOXIC, MUSIC (音乐类如MV、翻唱、演唱会等)。只输出英文单词。标题：${title} 简介：${desc} 标签：${tags}`;
             const sendRequest = (retriesLeft) => {
                 GM_xmlhttpRequest({
-                    method: "POST", url: API_CONFIG.endpoint,
-                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${API_CONFIG.key}` },
-                    data: JSON.stringify({ model: API_CONFIG.model, messages: [{ role: "user", content: prompt }], temperature: 0.1 }),
+                    method: "POST", url: api.endpoint,
+                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${api.key}` },
+                    data: JSON.stringify({ model: api.model, messages: [{ role: "user", content: prompt }], temperature: 0.1 }),
                     onload: function(response) {
                         if (response.status !== 200) return retriesLeft > 0 ? setTimeout(() => sendRequest(retriesLeft - 1), 1000) : reject("API Error");
                         try {
@@ -199,11 +218,12 @@
 
     const appealVideoWithAI = (title, desc, tags, reason) => {
         return new Promise((resolve, reject) => {
+            const api = getApiConfig();
             const prompt = `复审官。基于视频和用户理由判断。批准回复:APPROVED，驳回回复:REJECTED|理由。标题:${title} 简介:${desc} 标签:${tags} 理由:${reason}`;
             GM_xmlhttpRequest({
-                method: "POST", url: API_CONFIG.endpoint,
-                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${API_CONFIG.key}` },
-                data: JSON.stringify({ model: API_CONFIG.model, messages: [{ role: "user", content: prompt }], temperature: 0.1 }),
+                method: "POST", url: api.endpoint,
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${api.key}` },
+                data: JSON.stringify({ model: api.model, messages: [{ role: "user", content: prompt }], temperature: 0.1 }),
                 onload: function(response) {
                     if (response.status !== 200) return reject("API Error");
                     try { resolve(JSON.parse(response.responseText).choices[0].message.content.trim()); } catch (e) { reject("Parse Error"); }
@@ -214,7 +234,7 @@
     };
 
     // ==========================================
-    // 🛡️ 遮罩 UI 逻辑 (注入音乐申请按钮)
+    // 🛡️ 遮罩 UI 逻辑 
     // ==========================================
     const showPendingMask = () => {
         injectM3Style();
@@ -222,14 +242,15 @@
         if (!mask) { mask = document.createElement('div'); mask.id = 'ai-focus-mask'; mask.className = 'm3-overlay'; document.body.appendChild(mask); }
         mask.innerHTML = `<div class="m3-card"><h2 class="m3-title">哔哩哔哩审判庭</h2><div class="m3-chip" style="background-color: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant);">审查中...</div><p class="m3-desc" style="text-align: center;">AI 审判官正在查阅该视频的卷宗，请稍候...</p></div>`;
         setTimeout(() => mask.classList.add('show'), 10);
-        if (!window.pauseInterval) window.pauseInterval = setInterval(() => { const v = document.querySelector('video'); if (v && !v.paused) v.pause(); }, 100);
+        if (!window.pauseInterval) window.pauseInterval = setInterval(forcePauseVideo, 100);
     };
 
-    const showBlocker = (category, title, desc, tags) => {
+    const showBlocker = (category, title, desc, tags, currentVideoId) => {
         injectM3Style();
         let mask = document.getElementById('ai-focus-mask');
         if (!mask) { mask = document.createElement('div'); mask.id = 'ai-focus-mask'; mask.className = 'm3-overlay'; document.body.appendChild(mask); }
         
+        const visaCfg = getVisaConfig();
         let isMusic = (category === 'MUSIC');
         let musicBtnHtml = '';
         let canApplyMusic = false;
@@ -237,10 +258,10 @@
         if (isMusic) {
             let now = Date.now();
             let lastTime = GM_getValue('ai_focus_music_last_time', 0);
-            canApplyMusic = (now - lastTime) >= VISA_CONFIG.cooldown * 60 * 1000;
-            let cdRemaining = Math.ceil((VISA_CONFIG.cooldown * 60 * 1000 - (now - lastTime)) / 60000);
+            canApplyMusic = (now - lastTime) >= visaCfg.cooldown * 60 * 1000;
+            let cdRemaining = Math.ceil((visaCfg.cooldown * 60 * 1000 - (now - lastTime)) / 60000);
             
-            let btnText = canApplyMusic ? `🎸 申请音乐签证 (${VISA_CONFIG.duration}分钟)` : `⏳ 音乐签证冷却中 (${cdRemaining}分钟)`;
+            let btnText = canApplyMusic ? `🎸 申请音乐签证 (${visaCfg.duration}分钟)` : `⏳ 音乐签证冷却中 (${cdRemaining}分钟)`;
             let btnStyle = canApplyMusic ? `background-color: #006A6A; color: white;` : ``;
             let btnDisabled = canApplyMusic ? '' : 'disabled';
             
@@ -264,22 +285,21 @@
         document.getElementById('m3-appeal-btn').onclick = () => { document.getElementById('m3-initial-actions').style.display = 'none'; document.getElementById('m3-appeal-section').style.display = 'block'; document.getElementById('m3-appeal-reason').focus(); };
         document.getElementById('m3-appeal-cancel').onclick = () => { document.getElementById('m3-appeal-section').style.display = 'none'; document.getElementById('m3-initial-actions').style.display = 'flex'; document.getElementById('m3-appeal-reason').value = ''; };
         
-        // 🎼 音乐签证申请按钮逻辑
         if (isMusic && canApplyMusic) {
             document.getElementById('m3-music-btn').onclick = () => {
                 GM_setValue('ai_focus_music_last_time', Date.now());
-                showToast(`🎵 音乐签证签发！享受 ${VISA_CONFIG.duration} 分钟放松时间。`, "success");
+                showToast(`🎵 音乐签证签发！享受 ${visaCfg.duration} 分钟放松时间。`, "success");
                 mask.classList.remove('show'); setTimeout(() => mask.remove(), 300);
-                const videoEle = document.querySelector('video'); if (videoEle) videoEle.play();
+                
+                tryPlayVideo();
                 if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
 
-                // 核心：到点强行打断！
                 if (window.musicTimer) clearTimeout(window.musicTimer);
                 window.musicTimer = setTimeout(() => {
                     showToast("🎵 音乐签证已到期，恢复拦截！", "error");
-                    if (!window.pauseInterval) window.pauseInterval = setInterval(() => { const v = document.querySelector('video'); if (v && !v.paused) v.pause(); }, 100);
-                    showBlocker('MUSIC', title, desc, tags);
-                }, VISA_CONFIG.duration * 60 * 1000);
+                    if (!window.pauseInterval) window.pauseInterval = setInterval(forcePauseVideo, 100);
+                    showBlocker('MUSIC', title, desc, tags, currentVideoId);
+                }, visaCfg.duration * 60 * 1000);
             };
         }
 
@@ -290,11 +310,10 @@
             try {
                 const appealResult = await appealVideoWithAI(title, desc, tags, input.value.trim());
                 if (appealResult.toUpperCase().startsWith('APPROVED')) {
-                    GM_setValue(`ai_focus_cache_${extractVideoId(location.href)}`, 'APPROVED_BY_APPEAL');
-                    // 【修复2】：复议通过后，必须把锁死定时器关掉，否则视频放行后会鬼畜暂停！
+                    GM_setValue(`ai_focus_cache_${currentVideoId}`, 'APPROVED_BY_APPEAL');
                     if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
                     showToast("复议通过", "success"); mask.classList.remove('show'); setTimeout(() => mask.remove(), 300);
-                    const v = document.querySelector('video'); if (v) v.play();
+                    tryPlayVideo();
                 } else {
                     showToast("驳回：" + (appealResult.split('|')[1] || "理由牵强"), "error");
                     btn.innerText = "重新提交"; btn.disabled = false; input.disabled = false;
@@ -304,11 +323,19 @@
     };
 
     // ==========================================
-    // 🔍 信息提取器 
+    // 🔍 信息提取器 (修复分P视频的缓存冲突)
     // ==========================================
     const extractVideoId = (url) => {
-        try { const match = new URL(url).pathname.match(/\/video\/(BV\w+|av\d+)/i); return match ? match[1] : null; } catch(e) { return null; }
+        try { 
+            const urlObj = new URL(url);
+            const match = urlObj.pathname.match(/\/video\/(BV\w+|av\d+)/i); 
+            if (!match) return null;
+            // 考虑分P的情况，防止不同P共用同一缓存
+            const p = urlObj.searchParams.get('p') || '1';
+            return `${match[1]}_p${p}`;
+        } catch(e) { return null; }
     };
+    
     const getVideoInfo = () => {
         let title = document.querySelector('h1.video-title')?.innerText || document.querySelector('.video-title')?.innerText || '';
         let desc = document.querySelector('.desc-info-text, .video-desc, .basic-desc-info')?.innerText || document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
@@ -317,7 +344,7 @@
     };
 
     // ==========================================
-    // 🚀 主执行程序 (注入音乐时间线判定)
+    // 🚀 主执行程序
     // ==========================================
     let currentProcessId = 0;
     const main = async () => {
@@ -334,6 +361,10 @@
         if (!info.title || processId !== currentProcessId) return;
         const { title, desc, tags } = info;
 
+        // 动态获取最新配置，防多开标签页状态不同步
+        const allowedCats = getAllowedCategories();
+        const visaCfg = getVisaConfig();
+
         try {
             const cacheKey = `ai_focus_cache_${currentVideoId}`;
             let category = GM_getValue(cacheKey, null);
@@ -347,25 +378,23 @@
                 GM_setValue(cacheKey, category); 
             }
 
-            let isVisaApproved = ALLOWED_CATEGORIES.includes(category) || category === 'APPROVED_BY_APPEAL';
+            let isVisaApproved = allowedCats.includes(category) || category === 'APPROVED_BY_APPEAL';
 
-            // 🎵 检查是否在音乐签证有效期内
             if (category === 'MUSIC') {
                 let now = Date.now();
                 let lastTime = GM_getValue('ai_focus_music_last_time', 0);
-                let expiry = lastTime + VISA_CONFIG.duration * 60 * 1000;
+                let expiry = lastTime + visaCfg.duration * 60 * 1000;
                 
                 if (now < expiry) {
-                    isVisaApproved = true; // 签证有效，强行放行
+                    isVisaApproved = true;
                     let remaining = expiry - now;
                     console.log(`[哔哩哔哩审判庭] 音乐签证生效中，还剩 ${Math.floor(remaining/1000)} 秒`);
                     
-                    // 挂载定时炸弹，时间一到立刻拉闸
                     if (window.musicTimer) clearTimeout(window.musicTimer);
                     window.musicTimer = setTimeout(() => {
                         showToast("🎵 音乐签证已到期，注意劳逸结合，恢复拦截！", "error");
-                        if (!window.pauseInterval) window.pauseInterval = setInterval(() => { const v = document.querySelector('video'); if (v && !v.paused) v.pause(); }, 100);
-                        showBlocker('MUSIC', title, desc, tags);
+                        if (!window.pauseInterval) window.pauseInterval = setInterval(forcePauseVideo, 100);
+                        showBlocker('MUSIC', title, desc, tags, currentVideoId);
                     }, remaining);
                 }
             }
@@ -375,13 +404,12 @@
                 showToast(`允许通行`, "success");
                 const mask = document.getElementById('ai-focus-mask');
                 if (mask) { mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); }
-                const videoEle = document.querySelector('video'); if (videoEle) videoEle.play();
+                tryPlayVideo();
             } else {
-                // 【修复1】：如果是拦截状态，绝对不能清除定时器，还要确保它在后台死循环锁住视频！
                 if (!window.pauseInterval) { 
-                    window.pauseInterval = setInterval(() => { const v = document.querySelector('video'); if (v && !v.paused) v.pause(); }, 100); 
+                    window.pauseInterval = setInterval(forcePauseVideo, 100); 
                 }
-                showBlocker(category, title, desc, tags);
+                showBlocker(category, title, desc, tags, currentVideoId);
             }
 
         } catch (error) {
@@ -405,7 +433,11 @@
         if (currentVideoId && currentVideoId !== lastVideoId) {
             lastVideoId = currentVideoId;
             const existingMask = document.getElementById('ai-focus-mask'); if (existingMask) existingMask.remove();
+            
+            // 核心修复：切P或切视频时，必须清空上个视频遗留的暂停锁和定时炸弹
             if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
+            if (window.musicTimer) { clearTimeout(window.musicTimer); window.musicTimer = null; } 
+            
             triggerMainDebounced();
         }
     }).observe(document, {subtree: true, childList: true});
