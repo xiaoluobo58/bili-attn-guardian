@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.3.1
+// @version      1.3.2
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
-// @author       Misaka Milobo(By Gemini)
+// @author       Misaka Milobo(By Gemini and ChatGPT)
 // @match        *://*.bilibili.com/video/*
 // @homepageURL  https://www.milobo.moe
 // @grant        GM_xmlhttpRequest
@@ -30,7 +30,7 @@
 
     const APPROVED_BY_APPEAL = 'APPROVED_BY_APPEAL';
     const CATEGORY_OPTIONS = [
-        { value: 'LEARNING-COMMON', label: '通用学习', description: '学习性内容或者和学业有关的内容，例如网课、高中学习经验分享、语言学习技巧、高中心态调整教程、自然科学等，非计算机类' },
+        { value: 'LEARNING-COMMON', label: '通用学习', description: '学习性内容或者和学业有关的内容，例如网课、高中学习经验分享、语言学习技巧、高中心态调整教程、自然科学、留学申请等，非计算机类' },
         { value: 'LEARNING-CS', label: '计算机学习', description: '计算机科学学习性内容，例如编程、Godot/C++、算法、操作系统、网络、数据库、AI 原理等' },
         { value: 'GAME-GUIDE', label: '游戏干货', description: '属于游戏类且偏干货的内容，如攻略、机制分析、版本快照、配装路线等，再例如 Minecraft 更新介绍' },
         { value: 'GAME-ENTERTAINMENT', label: '游戏娱乐', description: '属于游戏类且偏娱乐的内容，如游戏实况、玩梗、剪辑、整活、主播切片、搞笑合集等' },
