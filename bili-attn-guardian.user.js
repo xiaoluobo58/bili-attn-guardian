@@ -30,13 +30,13 @@
 
     const APPROVED_BY_APPEAL = 'APPROVED_BY_APPEAL';
     const CATEGORY_OPTIONS = [
-        { value: 'LEARNING-COMMON', label: '通用学习', description: '课程、讲座、考试、语言、人文社科、自然科学等非计算机学习内容' },
-        { value: 'LEARNING-CS', label: '计算机学习', description: '编程、Godot/C++、算法、操作系统、网络、数据库、AI 原理等计算机内容' },
-        { value: 'GAME-GUIDE', label: '游戏干货', description: '攻略、机制分析、版本快照、Minecraft 更新介绍、配装路线等' },
-        { value: 'GAME-ENTERTAINMENT', label: '游戏娱乐', description: '游戏实况、玩梗、剪辑、整活、主播切片、搞笑合集等' },
+        { value: 'LEARNING-COMMON', label: '通用学习', description: '学习性内容或者和学业有关的内容，例如网课、高中学习经验分享、语言学习技巧、高中心态调整教程、自然科学等，非计算机类' },
+        { value: 'LEARNING-CS', label: '计算机学习', description: '计算机科学学习性内容，例如编程、Godot/C++、算法、操作系统、网络、数据库、AI 原理等' },
+        { value: 'GAME-GUIDE', label: '游戏干货', description: '属于游戏类且偏干货的内容，如攻略、机制分析、版本快照、配装路线等，再例如 Minecraft 更新介绍' },
+        { value: 'GAME-ENTERTAINMENT', label: '游戏娱乐', description: '属于游戏类且偏娱乐的内容，如游戏实况、玩梗、剪辑、整活、主播切片、搞笑合集等' },
         { value: 'TECH-NEWS', label: '科技资讯', description: '科技新闻、AI 快报、产品发布、行业动态等非教程内容' },
-        { value: 'MUSIC', label: '音乐放松', description: '音乐、MV、翻唱、演奏、白噪音；不勾选时走限时签证' },
-        { value: 'LOW_VALUE', label: '低价值注意力劫持', description: '标题党、爽文解说、MEME、地缘政治、争议新闻、吃瓜等' },
+        { value: 'MUSIC', label: '音乐放松', description: '音乐放松类内容，如音乐、MV、翻唱、演奏' },
+        { value: 'LOW_VALUE', label: '低价值注意力劫持', description: '标题党、爽文解说、MEME、玩梗鬼畜视频、地缘政治、新闻、吃瓜等' },
         { value: 'UNKNOWN', label: '信息不足', description: '信息不足或难以可靠判断；默认建议保守处理' }
     ];
     const DEFAULT_ALLOWED_CATEGORIES = ['LEARNING-COMMON', 'LEARNING-CS', 'GAME-GUIDE', 'TECH-NEWS'];
