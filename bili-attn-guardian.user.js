@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.2.5
+// @version      1.2.6
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini)
 // @match        *://*.bilibili.com/video/*
@@ -41,6 +41,25 @@
         'MUSIC': '音乐放松'
     };
 
+    const LOG_PREFIX = '[哔哩哔哩审判庭]';
+    const logInfo = (...args) => console.log(LOG_PREFIX, ...args);
+    const logWarn = (...args) => console.warn(LOG_PREFIX, ...args);
+    const logError = (message, error) => {
+        if (error !== undefined) console.error(LOG_PREFIX, message, error);
+        else console.error(LOG_PREFIX, message);
+    };
+    const getErrorMessage = (error) => {
+        if (!error) return '未知错误';
+        if (typeof error === 'string') return error;
+        return error.message || String(error);
+    };
+    const normalizeText = (text) => (text || '').replace(/\s+/g, ' ').trim();
+    const uniqueJoin = (items) => Array.from(new Set(items.map(normalizeText).filter(Boolean))).join(', ');
+    const appendUiElement = (element) => (document.body || document.documentElement).appendChild(element);
+
+    window.addEventListener('error', event => logError('脚本运行错误', event.error || event.message));
+    window.addEventListener('unhandledrejection', event => logError('未处理的 Promise 异常', event.reason));
+
     // ==========================================
     // 🎬 播放器控制封装 
     // ==========================================
@@ -56,7 +75,7 @@
         if (v && v.paused) {
             const playPromise = v.play();
             if (playPromise !== undefined) {
-                playPromise.catch(e => console.log("[哔哩哔哩审判庭] 浏览器阻止了自动播放，需用户手动点击"));
+                playPromise.catch(e => logWarn("浏览器阻止了自动播放，需用户手动点击", e));
             }
         }
     };
@@ -100,13 +119,13 @@
             .m3-toast-close { cursor: pointer; font-weight: 600; font-size: 16px; opacity: 0.6; transition: opacity 0.2s; }
             .m3-toast-close:hover { opacity: 1; }
         `;
-        document.head.appendChild(style);
+        (document.head || document.documentElement).appendChild(style);
     };
 
     const showToast = (message, type = 'error') => {
         injectM3Style();
         let toast = document.getElementById('m3-toast');
-        if (!toast) { toast = document.createElement('div'); toast.id = 'm3-toast'; document.body.appendChild(toast); }
+        if (!toast) { toast = document.createElement('div'); toast.id = 'm3-toast'; appendUiElement(toast); }
         toast.className = type;
         toast.innerHTML = `<span>${message}</span><span class="m3-toast-close" onclick="document.getElementById('m3-toast').classList.remove('show')">✕</span>`;
         void toast.offsetWidth; toast.classList.add('show');
@@ -168,7 +187,7 @@
                 <div style="margin-top: 16px; display: flex; justify-content: center;"><button class="m3-button tonal" id="m3-cfg-cancel">取消</button><button class="m3-button primary" id="m3-cfg-save">保存配置</button></div>
             </div>
         `;
-        document.body.appendChild(mask);
+        appendUiElement(mask);
         setTimeout(() => mask.classList.add('show'), 10);
         
         document.getElementById('m3-cfg-cancel').onclick = () => { mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); };
@@ -224,15 +243,18 @@
                             modelInput.click();
 
                         } catch (e) {
+                            logError("模型列表解析失败", e);
                             showToast("解析数据失败，API 格式不兼容标准规范", "error");
                         }
                     } else {
+                        logError(`模型列表拉取失败，状态码: ${response.status}`, response.responseText);
                         showToast(`拉取失败，状态码: ${response.status}`, "error");
                     }
                 },
-                onerror: function() {
+                onerror: function(error) {
                     btn.innerText = "拉取列表";
                     btn.disabled = false;
+                    logError("模型列表网络请求失败", error);
                     showToast("网络请求失败，请检查网络或跨域限制", "error");
                 }
             });
@@ -270,23 +292,60 @@
     const checkVideoWithAI = (title, desc, tags, retryCount = 1) => {
         return new Promise((resolve, reject) => {
             const api = getApiConfig();
-            if (!api.key) { showToast("未配置 API Key", "error"); openSettings(); return reject("Missing API Key"); }
+            if (!api.key) {
+                const error = new Error("未配置 API Key");
+                logError("AI 初审失败", error);
+                showToast("未配置 API Key", "error");
+                openSettings();
+                return reject(error);
+            }
             const prompt = `分析以下视频将其分类为7种之一：ACADEMIC, PRACTICAL, GAME_GUIDE, TECH_REVIEW, HIJACKING, TOXIC, MUSIC (音乐类如MV、翻唱、演唱会等)。只输出英文单词。标题：${title} 简介：${desc} 标签：${tags}`;
             const sendRequest = (retriesLeft) => {
                 GM_xmlhttpRequest({
                     method: "POST", url: api.endpoint,
                     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${api.key}` },
                     data: JSON.stringify({ model: api.model, messages: [{ role: "user", content: prompt }], temperature: 0.1 }),
+                    timeout: 30000,
                     onload: function(response) {
-                        if (response.status !== 200) return retriesLeft > 0 ? setTimeout(() => sendRequest(retriesLeft - 1), 1000) : reject("API Error");
+                        if (response.status !== 200) {
+                            const error = new Error(`API Error ${response.status}: ${(response.responseText || '').slice(0, 300)}`);
+                            if (retriesLeft > 0) {
+                                logWarn("AI 初审请求失败，1 秒后重试", error);
+                                setTimeout(() => sendRequest(retriesLeft - 1), 1000);
+                            } else {
+                                logError("AI 初审请求失败", error);
+                                reject(error);
+                            }
+                            return;
+                        }
                         try {
                             const res = JSON.parse(response.responseText);
                             const content = res.choices[0].message.content.trim().toUpperCase();
                             const match = content.match(/ACADEMIC|PRACTICAL|GAME_GUIDE|TECH_REVIEW|HIJACKING|TOXIC|MUSIC/);
                             resolve(match ? match[0] : 'HIJACKING');
-                        } catch (e) { reject("Parse Error"); }
+                        } catch (e) { logError("AI 初审响应解析失败", e); reject(e); }
                     },
-                    onerror: function() { retriesLeft > 0 ? setTimeout(() => sendRequest(retriesLeft - 1), 1000) : reject("Network Error"); }
+                    onerror: function(error) {
+                        const networkError = new Error("Network Error");
+                        networkError.detail = error;
+                        if (retriesLeft > 0) {
+                            logWarn("AI 初审网络异常，1 秒后重试", networkError);
+                            setTimeout(() => sendRequest(retriesLeft - 1), 1000);
+                        } else {
+                            logError("AI 初审网络异常", networkError);
+                            reject(networkError);
+                        }
+                    },
+                    ontimeout: function() {
+                        const timeoutError = new Error("API Request Timeout");
+                        if (retriesLeft > 0) {
+                            logWarn("AI 初审请求超时，1 秒后重试", timeoutError);
+                            setTimeout(() => sendRequest(retriesLeft - 1), 1000);
+                        } else {
+                            logError("AI 初审请求超时", timeoutError);
+                            reject(timeoutError);
+                        }
+                    }
                 });
             };
             sendRequest(retryCount);
@@ -301,11 +360,26 @@
                 method: "POST", url: api.endpoint,
                 headers: { "Content-Type": "application/json", "Authorization": `Bearer ${api.key}` },
                 data: JSON.stringify({ model: api.model, messages: [{ role: "user", content: prompt }], temperature: 0.1 }),
+                timeout: 30000,
                 onload: function(response) {
-                    if (response.status !== 200) return reject("API Error");
-                    try { resolve(JSON.parse(response.responseText).choices[0].message.content.trim()); } catch (e) { reject("Parse Error"); }
+                    if (response.status !== 200) {
+                        const error = new Error(`API Error ${response.status}: ${(response.responseText || '').slice(0, 300)}`);
+                        logError("AI 复审请求失败", error);
+                        return reject(error);
+                    }
+                    try { resolve(JSON.parse(response.responseText).choices[0].message.content.trim()); } catch (e) { logError("AI 复审响应解析失败", e); reject(e); }
                 },
-                onerror: function() { reject("Network Error"); }
+                onerror: function(error) {
+                    const networkError = new Error("Network Error");
+                    networkError.detail = error;
+                    logError("AI 复审网络异常", networkError);
+                    reject(networkError);
+                },
+                ontimeout: function() {
+                    const timeoutError = new Error("API Request Timeout");
+                    logError("AI 复审请求超时", timeoutError);
+                    reject(timeoutError);
+                }
             });
         });
     };
@@ -316,16 +390,38 @@
     const showPendingMask = () => {
         injectM3Style();
         let mask = document.getElementById('ai-focus-mask');
-        if (!mask) { mask = document.createElement('div'); mask.id = 'ai-focus-mask'; mask.className = 'm3-overlay'; document.body.appendChild(mask); }
+        if (!mask) { mask = document.createElement('div'); mask.id = 'ai-focus-mask'; mask.className = 'm3-overlay'; appendUiElement(mask); }
         mask.innerHTML = `<div class="m3-card"><h2 class="m3-title">哔哩哔哩审判庭</h2><div class="m3-chip" style="background-color: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant);">审查中...</div><p class="m3-desc" style="text-align: center;">AI 审判官正在查阅该视频的卷宗，请稍候...</p></div>`;
         setTimeout(() => mask.classList.add('show'), 10);
         if (!window.pauseInterval) window.pauseInterval = setInterval(forcePauseVideo, 100);
     };
 
+    const showErrorMask = (message, error) => {
+        logError(message, error);
+        injectM3Style();
+        let mask = document.getElementById('ai-focus-mask');
+        if (!mask) { mask = document.createElement('div'); mask.id = 'ai-focus-mask'; mask.className = 'm3-overlay'; appendUiElement(mask); }
+        mask.innerHTML = `
+            <div class="m3-card">
+                <h2 class="m3-title">哔哩哔哩审判庭</h2>
+                <div class="m3-chip">审查异常</div>
+                <p class="m3-desc" style="text-align: center;">${message}<br>为避免注意力防线失效，视频将继续保持屏蔽。</p>
+                <div style="display: flex; justify-content: center; flex-wrap: wrap; gap: 8px;">
+                    <button class="m3-button tonal" id="m3-error-settings">打开配置</button>
+                    <button class="m3-button primary" id="m3-error-retry">重新审查</button>
+                </div>
+            </div>`;
+        setTimeout(() => mask.classList.add('show'), 10);
+        if (!window.pauseInterval) window.pauseInterval = setInterval(forcePauseVideo, 100);
+        showToast(message, "error");
+        document.getElementById('m3-error-settings').onclick = openSettings;
+        document.getElementById('m3-error-retry').onclick = () => triggerMainDebounced(true);
+    };
+
     const showBlocker = (category, title, desc, tags, currentVideoId) => {
         injectM3Style();
         let mask = document.getElementById('ai-focus-mask');
-        if (!mask) { mask = document.createElement('div'); mask.id = 'ai-focus-mask'; mask.className = 'm3-overlay'; document.body.appendChild(mask); }
+        if (!mask) { mask = document.createElement('div'); mask.id = 'ai-focus-mask'; mask.className = 'm3-overlay'; appendUiElement(mask); }
         
         const visaCfg = getVisaConfig();
         let isMusic = (category === 'MUSIC');
@@ -395,7 +491,7 @@
                     showToast("驳回：" + (appealResult.split('|')[1] || "理由牵强"), "error");
                     btn.innerText = "重新提交"; btn.disabled = false; input.disabled = false;
                 }
-            } catch (e) { showToast("网络异常", "error"); btn.innerText = "提交"; btn.disabled = false; input.disabled = false; }
+            } catch (e) { logError("申诉流程异常", e); showToast("网络异常，申诉未完成", "error"); btn.innerText = "提交"; btn.disabled = false; input.disabled = false; }
         };
     };
 
@@ -409,14 +505,26 @@
             if (!match) return null;
             const p = urlObj.searchParams.get('p') || '1';
             return `${match[1]}_p${p}`;
-        } catch(e) { return null; }
+        } catch(e) { logError("解析视频 ID 失败", e); return null; }
     };
     
     const getVideoInfo = () => {
-        let title = document.querySelector('h1.video-title')?.innerText || document.querySelector('.video-title')?.innerText || '';
-        let desc = document.querySelector('.desc-info-text, .video-desc, .basic-desc-info')?.innerText || document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
-        let tags = Array.from(document.querySelectorAll('.tag-link, .tag-txt')).map(e => e.innerText.trim()).join(', ') || document.querySelector('meta[name="keywords"]')?.getAttribute('content') || '';
+        let title = normalizeText(document.querySelector('h1.video-title')?.innerText || document.querySelector('.video-title')?.innerText || document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '');
+        let desc = normalizeText(document.querySelector('.desc-info-text, .video-desc, .basic-desc-info')?.innerText || document.querySelector('meta[name="description"]')?.getAttribute('content') || '');
+        const tagSelectors = '.tag-link, .tag-txt, .video-tag, .video-tag-container a, .video-tag-container .tag, .tag-panel a';
+        const domTags = Array.from(document.querySelectorAll(tagSelectors)).map(e => e.innerText || e.textContent);
+        const metaTags = (document.querySelector('meta[name="keywords"]')?.getAttribute('content') || '').split(/[,，]/);
+        let tags = uniqueJoin(domTags) || uniqueJoin(metaTags);
         return { title, desc, tags };
+    };
+
+    const logVideoInfo = ({ title, desc, tags }) => {
+        if (console.groupCollapsed) console.groupCollapsed(`${LOG_PREFIX} 视频信息抓取结果`);
+        logInfo("标题:", title || "(空)");
+        logInfo("简介:", desc || "(空)");
+        logInfo("TAG:", tags || "(空)");
+        if (!tags) logWarn("未抓取到 TAG，已继续使用标题和简介进行审查");
+        if (console.groupEnd) console.groupEnd();
     };
 
     // ==========================================
@@ -428,26 +536,30 @@
         const currentVideoId = extractVideoId(location.href);
         if (!currentVideoId) return;
 
-        let info = getVideoInfo();
-        for(let i=0; i<30; i++) {
-            if (info.title) break;
-            await new Promise(r => setTimeout(r, 100)); 
-            info = getVideoInfo();
-        }
-        if (!info.title || processId !== currentProcessId) return;
-        const { title, desc, tags } = info;
-
-        const allowedCats = getAllowedCategories();
-        const visaCfg = getVisaConfig();
-
         try {
+            let info = getVideoInfo();
+            let titleReadyAt = -1;
+            for(let i=0; i<80; i++) {
+                if (processId !== currentProcessId) return;
+                if (info.title && titleReadyAt < 0) titleReadyAt = i;
+                if (info.title && (info.tags || i - titleReadyAt >= 20)) break;
+                await new Promise(r => setTimeout(r, 150)); 
+                info = getVideoInfo();
+            }
+            if (!info.title) throw new Error("无法抓取视频标题，页面可能仍未加载完成");
+            if (processId !== currentProcessId) return;
+            logVideoInfo(info);
+
+            const { title, desc, tags } = info;
+            const allowedCats = getAllowedCategories();
+            const visaCfg = getVisaConfig();
             const cacheKey = `ai_focus_cache_${currentVideoId}`;
             let category = GM_getValue(cacheKey, null);
 
             if (category) {
-                console.log(`[哔哩哔哩审判庭] ⚡ 命中本地缓存，0延迟放行/拦截: ${category}`);
+                logInfo(`⚡ 命中本地缓存，0延迟放行/拦截: ${category}`);
             } else {
-                console.log(`[哔哩哔哩审判庭] 🔍 未命中缓存，呼叫AI审判官...`);
+                logInfo("🔍 未命中缓存，呼叫AI审判官...");
                 category = await checkVideoWithAI(title, desc, tags);
                 if (processId !== currentProcessId) return;
                 GM_setValue(cacheKey, category); 
@@ -463,7 +575,7 @@
                 if (now < expiry) {
                     isVisaApproved = true;
                     let remaining = expiry - now;
-                    console.log(`[哔哩哔哩审判庭] 音乐签证生效中，还剩 ${Math.floor(remaining/1000)} 秒`);
+                    logInfo(`音乐签证生效中，还剩 ${Math.floor(remaining/1000)} 秒`);
                     
                     if (window.musicTimer) clearTimeout(window.musicTimer);
                     window.musicTimer = setTimeout(() => {
@@ -489,32 +601,63 @@
 
         } catch (error) {
             if (processId === currentProcessId) {
-                if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
-                const mask = document.getElementById('ai-focus-mask'); if (mask) mask.remove();
+                showErrorMask(`审查失败：${getErrorMessage(error)}`, error);
             }
         }
     };
 
     let debounceTimer = null;
-    const triggerMainDebounced = () => {
+    let scheduledVideoId = null;
+    const triggerMainDebounced = (force = false) => {
+        const currentVideoId = extractVideoId(location.href);
+        if (!currentVideoId) return;
+        if (!force && scheduledVideoId === currentVideoId) return;
+        scheduledVideoId = currentVideoId;
         showPendingMask();
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => main(), 50);
     };
 
     let lastVideoId = extractVideoId(location.href);
-    new MutationObserver(() => {
+    const resetRuntimeForNavigation = () => {
+        currentProcessId++;
+        scheduledVideoId = null;
+        const existingMask = document.getElementById('ai-focus-mask'); if (existingMask) existingMask.remove();
+        if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
+        if (window.musicTimer) { clearTimeout(window.musicTimer); window.musicTimer = null; }
+    };
+
+    const handleVideoRouteChange = () => {
         const currentVideoId = extractVideoId(location.href);
         if (currentVideoId && currentVideoId !== lastVideoId) {
             lastVideoId = currentVideoId;
-            const existingMask = document.getElementById('ai-focus-mask'); if (existingMask) existingMask.remove();
-            
-            if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
-            if (window.musicTimer) { clearTimeout(window.musicTimer); window.musicTimer = null; } 
-            
+            resetRuntimeForNavigation();
             triggerMainDebounced();
         }
-    }).observe(document, {subtree: true, childList: true});
+    };
 
-    window.addEventListener('load', () => { if (extractVideoId(location.href)) triggerMainDebounced(); });
+    new MutationObserver(handleVideoRouteChange).observe(document, {subtree: true, childList: true});
+
+    ['pushState', 'replaceState'].forEach(methodName => {
+        const original = history[methodName];
+        history[methodName] = function(...args) {
+            const result = original.apply(this, args);
+            setTimeout(handleVideoRouteChange, 0);
+            return result;
+        };
+    });
+
+    const startGuardian = () => {
+        const currentVideoId = extractVideoId(location.href);
+        if (!currentVideoId) return;
+        lastVideoId = currentVideoId;
+        triggerMainDebounced();
+    };
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startGuardian, { once: true });
+    else setTimeout(startGuardian, 0);
+    window.addEventListener('load', startGuardian);
+    window.addEventListener('popstate', () => setTimeout(handleVideoRouteChange, 0));
+    setTimeout(startGuardian, 1000);
+    setTimeout(startGuardian, 3000);
 })();
