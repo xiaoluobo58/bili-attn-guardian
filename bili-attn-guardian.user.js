@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.3.2
+// @version      1.3.3
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini and ChatGPT)
 // @match        *://*.bilibili.com/video/*
@@ -25,7 +25,10 @@
     const getApiConfig = () => ({
         key: GM_getValue('ai_focus_key', ''),
         endpoint: GM_getValue('ai_focus_endpoint', 'https://api.openai.com/v1/chat/completions'),
-        model: GM_getValue('ai_focus_model', 'gpt-5.5') 
+        model: GM_getValue('ai_focus_model', 'gpt-5.5'),
+        backupKey: GM_getValue('ai_focus_backup_key', ''),
+        backupEndpoint: GM_getValue('ai_focus_backup_endpoint', ''),
+        backupModel: GM_getValue('ai_focus_backup_model', '')
     });
 
     const APPROVED_BY_APPEAL = 'APPROVED_BY_APPEAL';
@@ -319,6 +322,16 @@ ${categoryCheckboxHtml}
                     <datalist id="m3-model-list"></datalist>
                 </div>
 
+                <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
+                    <label class="group-title">备用 API Key（可选，仅主 API 失败时使用）</label><input type="password" id="m3-cfg-backup-key" value="${currentApi.backupKey}" placeholder="sk-...">
+                </div>
+                <div class="m3-input-group" style="margin-bottom: 12px;">
+                    <label class="group-title">备用 API Endpoint</label><input type="text" id="m3-cfg-backup-endpoint" value="${currentApi.backupEndpoint}" placeholder="https://backup.example.com/v1/chat/completions">
+                </div>
+                <div class="m3-input-group" style="margin-bottom: 12px;">
+                    <label class="group-title">备用 Model</label><input type="text" id="m3-cfg-backup-model" value="${currentApi.backupModel}" placeholder="备用模型名称">
+                </div>
+
                 <div style="margin-top: 16px; display: flex; justify-content: center;"><button class="m3-button tonal" id="m3-cfg-cancel">取消</button><button class="m3-button primary" id="m3-cfg-save">保存配置</button></div>
             </div>
         `;
@@ -399,8 +412,13 @@ ${categoryCheckboxHtml}
         document.getElementById('m3-cfg-save').onclick = () => {
             const newKey = document.getElementById('m3-cfg-key').value.trim();
             const newModel = document.getElementById('m3-cfg-model').value.trim();
+            const newBackupKey = document.getElementById('m3-cfg-backup-key').value.trim();
+            const newBackupEndpoint = document.getElementById('m3-cfg-backup-endpoint').value.trim();
+            const newBackupModel = document.getElementById('m3-cfg-backup-model').value.trim();
             if (!newKey) return showToast("API Key 不能为空", "error");
             if (!newModel) return showToast("模型名称不能为空", "error");
+            const hasAnyBackupConfig = Boolean(newBackupKey || newBackupEndpoint || newBackupModel);
+            if (hasAnyBackupConfig && (!newBackupKey || !newBackupEndpoint || !newBackupModel)) return showToast("备用 API 需同时填写 Key、Endpoint 和 Model", "error");
             
             let nVal = parseInt(document.getElementById('m3-cfg-music-duration').value) || 5;
             if (nVal < 1) nVal = 1; if (nVal > 10) nVal = 10;
@@ -415,6 +433,9 @@ ${categoryCheckboxHtml}
             GM_setValue('ai_focus_key', newKey); 
             GM_setValue('ai_focus_endpoint', document.getElementById('m3-cfg-endpoint').value.trim()); 
             GM_setValue('ai_focus_model', newModel);
+            GM_setValue('ai_focus_backup_key', newBackupKey);
+            GM_setValue('ai_focus_backup_endpoint', newBackupEndpoint);
+            GM_setValue('ai_focus_backup_model', newBackupModel);
             
             mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); showToast("配置已保存", "success");
         };
@@ -424,107 +445,130 @@ ${categoryCheckboxHtml}
     // ==========================================
     // 🧠 AI 判断逻辑
     // ==========================================
-    const checkVideoWithAI = (title, desc, tags, retryCount = 1) => {
+    const createPrimaryApiTarget = (api) => ({
+        name: '主 API',
+        key: api.key,
+        endpoint: api.endpoint,
+        model: api.model
+    });
+
+    const createBackupApiTarget = (api) => {
+        if (!api.backupKey || !api.backupEndpoint || !api.backupModel) return null;
+        return {
+            name: '备用 API',
+            key: api.backupKey,
+            endpoint: api.backupEndpoint,
+            model: api.backupModel
+        };
+    };
+
+    const requestChatCompletionOnce = (target, messages, contextLabel, temperature = 0.1) => {
         return new Promise((resolve, reject) => {
-            const api = getApiConfig();
-            if (!api.key) {
-                const error = new Error("未配置 API Key");
-                logError("AI 初审失败", error);
-                showToast("未配置 API Key", "error");
-                openSettings();
-                return reject(error);
-            }
-            const prompt = createVideoReviewPrompt(title, desc, tags);
-            const sendRequest = (retriesLeft) => {
-                GM_xmlhttpRequest({
-                    method: "POST", url: api.endpoint,
-                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${api.key}` },
-                    data: JSON.stringify({
-                        model: api.model,
-                        messages: [
-                            { role: "system", content: VIDEO_REVIEW_SYSTEM_PROMPT },
-                            { role: "user", content: prompt }
-                        ],
-                        temperature: 0.1
-                    }),
-                    timeout: 30000,
-                    onload: function(response) {
-                        if (response.status !== 200) {
-                            const error = new Error(`API Error ${response.status}: ${(response.responseText || '').slice(0, 300)}`);
-                            if (retriesLeft > 0) {
-                                logWarn("AI 初审请求失败，1 秒后重试", error);
-                                setTimeout(() => sendRequest(retriesLeft - 1), 1000);
-                            } else {
-                                logError("AI 初审请求失败", error);
-                                reject(error);
-                            }
-                            return;
-                        }
-                        try {
-                            const res = JSON.parse(response.responseText);
-                            const content = res.choices?.[0]?.message?.content?.trim() || '';
-                            const review = parseVideoReviewResult(content);
-                            logInfo(`AI 分类结果: ${review.category}，置信度 ${formatConfidence(review.confidence)}，理由：${review.reason}`);
-                            resolve(review);
-                        } catch (e) { logError("AI 初审响应解析失败", e); reject(e); }
-                    },
-                    onerror: function(error) {
-                        const networkError = new Error("Network Error");
-                        networkError.detail = error;
-                        if (retriesLeft > 0) {
-                            logWarn("AI 初审网络异常，1 秒后重试", networkError);
-                            setTimeout(() => sendRequest(retriesLeft - 1), 1000);
-                        } else {
-                            logError("AI 初审网络异常", networkError);
-                            reject(networkError);
-                        }
-                    },
-                    ontimeout: function() {
-                        const timeoutError = new Error("API Request Timeout");
-                        if (retriesLeft > 0) {
-                            logWarn("AI 初审请求超时，1 秒后重试", timeoutError);
-                            setTimeout(() => sendRequest(retriesLeft - 1), 1000);
-                        } else {
-                            logError("AI 初审请求超时", timeoutError);
-                            reject(timeoutError);
-                        }
+            GM_xmlhttpRequest({
+                method: "POST",
+                url: target.endpoint,
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${target.key}` },
+                data: JSON.stringify({ model: target.model, messages, temperature }),
+                timeout: 30000,
+                onload: function(response) {
+                    if (response.status !== 200) {
+                        reject(new Error(`${target.name} ${contextLabel}失败，状态码 ${response.status}: ${(response.responseText || '').slice(0, 300)}`));
+                        return;
                     }
-                });
+                    try {
+                        const res = JSON.parse(response.responseText);
+                        const content = res.choices?.[0]?.message?.content?.trim();
+                        if (!content) throw new Error(`${target.name} ${contextLabel}响应缺少 choices[0].message.content`);
+                        resolve(content);
+                    } catch (e) {
+                        reject(e);
+                    }
+                },
+                onerror: function(error) {
+                    const networkError = new Error(`${target.name} ${contextLabel}网络异常`);
+                    networkError.detail = error;
+                    reject(networkError);
+                },
+                ontimeout: function() {
+                    reject(new Error(`${target.name} ${contextLabel}请求超时`));
+                }
+            });
+        });
+    };
+
+    const requestChatCompletionWithRetry = (target, messages, contextLabel, retryCount = 1, temperature = 0.1) => {
+        return new Promise((resolve, reject) => {
+            const sendRequest = (retriesLeft) => {
+                requestChatCompletionOnce(target, messages, contextLabel, temperature)
+                    .then(resolve)
+                    .catch(error => {
+                        if (retriesLeft > 0) {
+                            logWarn(`${target.name} ${contextLabel}失败，1 秒后重试`, error);
+                            setTimeout(() => sendRequest(retriesLeft - 1), 1000);
+                        } else {
+                            reject(error);
+                        }
+                    });
             };
             sendRequest(retryCount);
         });
     };
 
-    const appealVideoWithAI = (title, desc, tags, reason) => {
-        return new Promise((resolve, reject) => {
-            const api = getApiConfig();
-            const prompt = `复审官。基于视频和用户理由判断。批准回复:APPROVED，驳回回复:REJECTED|理由。标题:${title} 简介:${desc} 标签:${tags} 理由:${reason}`;
-            GM_xmlhttpRequest({
-                method: "POST", url: api.endpoint,
-                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${api.key}` },
-                data: JSON.stringify({ model: api.model, messages: [{ role: "user", content: prompt }], temperature: 0.1 }),
-                timeout: 30000,
-                onload: function(response) {
-                    if (response.status !== 200) {
-                        const error = new Error(`API Error ${response.status}: ${(response.responseText || '').slice(0, 300)}`);
-                        logError("AI 复审请求失败", error);
-                        return reject(error);
-                    }
-                    try { resolve(JSON.parse(response.responseText).choices[0].message.content.trim()); } catch (e) { logError("AI 复审响应解析失败", e); reject(e); }
-                },
-                onerror: function(error) {
-                    const networkError = new Error("Network Error");
-                    networkError.detail = error;
-                    logError("AI 复审网络异常", networkError);
-                    reject(networkError);
-                },
-                ontimeout: function() {
-                    const timeoutError = new Error("API Request Timeout");
-                    logError("AI 复审请求超时", timeoutError);
-                    reject(timeoutError);
-                }
-            });
-        });
+    const notifyBackupApiUsage = (contextLabel, primaryError, backupTarget) => {
+        const message = `主 API ${contextLabel}失败，已切换备用 API`;
+        showToast(message, "error");
+        logWarn(`${message}。备用 Endpoint: ${backupTarget.endpoint}，备用 Model: ${backupTarget.model}`, primaryError);
+    };
+
+    const requestChatCompletion = async (messages, contextLabel, retryCount = 1, temperature = 0.1) => {
+        const api = getApiConfig();
+        if (!api.key) {
+            const error = new Error("未配置 API Key");
+            logError(`${contextLabel}失败`, error);
+            showToast("未配置 API Key", "error");
+            openSettings();
+            throw error;
+        }
+        if (!api.model) {
+            const error = new Error("未配置模型名称");
+            logError(`${contextLabel}失败`, error);
+            openSettings();
+            throw error;
+        }
+
+        const primaryTarget = createPrimaryApiTarget(api);
+        const backupTarget = createBackupApiTarget(api);
+
+        try {
+            return await requestChatCompletionWithRetry(primaryTarget, messages, contextLabel, retryCount, temperature);
+        } catch (primaryError) {
+            logError(`${primaryTarget.name} ${contextLabel}最终失败`, primaryError);
+            if (!backupTarget) throw primaryError;
+
+            notifyBackupApiUsage(contextLabel, primaryError, backupTarget);
+            try {
+                return await requestChatCompletionWithRetry(backupTarget, messages, contextLabel, retryCount, temperature);
+            } catch (backupError) {
+                logError(`${backupTarget.name} ${contextLabel}也失败`, backupError);
+                throw backupError;
+            }
+        }
+    };
+
+    const checkVideoWithAI = async (title, desc, tags, retryCount = 1) => {
+        const prompt = createVideoReviewPrompt(title, desc, tags);
+        const content = await requestChatCompletion([
+            { role: "system", content: VIDEO_REVIEW_SYSTEM_PROMPT },
+            { role: "user", content: prompt }
+        ], "AI 初审", retryCount);
+        const review = parseVideoReviewResult(content);
+        logInfo(`AI 分类结果: ${review.category}，置信度 ${formatConfidence(review.confidence)}，理由：${review.reason}`);
+        return review;
+    };
+
+    const appealVideoWithAI = async (title, desc, tags, reason, retryCount = 1) => {
+        const prompt = `复审官。基于视频和用户理由判断。批准回复:APPROVED，驳回回复:REJECTED|理由。标题:${title} 简介:${desc} 标签:${tags} 理由:${reason}`;
+        return requestChatCompletion([{ role: "user", content: prompt }], "AI 复审", retryCount);
     };
 
     // ==========================================
