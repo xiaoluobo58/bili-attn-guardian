@@ -40,7 +40,7 @@
         { value: 'TECH-NEWS', label: '科技资讯', description: '科技新闻、AI 快报、产品发布、行业动态等非教程内容' },
         { value: 'MUSIC', label: '音乐放松', description: '音乐放松类内容，如音乐、MV、翻唱、演奏' },
         { value: 'LOW_VALUE', label: '低价值注意力劫持', description: '标题党、爽文解说、MEME、玩梗鬼畜视频、地缘政治、新闻、吃瓜等' },
-        { value: 'UNKNOWN', label: '信息不足', description: '信息不足或难以可靠判断；默认建议保守处理' }
+        { value: 'UNKNOWN', label: '信息不足', description: '信息不足或难以可靠判断' }
     ];
     const DEFAULT_ALLOWED_CATEGORIES = ['LEARNING-COMMON', 'LEARNING-CS', 'GAME-GUIDE', 'TECH-NEWS'];
     const VALID_CATEGORIES = CATEGORY_OPTIONS.map(option => option.value);
