@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.3.4
+// @version      1.3.5
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini and ChatGPT)
 // @match        *://*.bilibili.com/video/*
@@ -496,8 +496,8 @@ ${getApiConfigFieldsHtml(currentApi, 'm3-cfg')}
         const mask = document.createElement('div'); mask.id = 'm3-api-settings-mask'; mask.className = 'm3-overlay';
         mask.innerHTML = `
             <div class="m3-card" style="max-height: 95vh;">
-                <h2 class="m3-title">审判庭 API 配置</h2>
-                <p class="m3-desc" style="text-align: center; margin-bottom: 12px;">这里只修改主 API 与备用 API，不会变更放行分类、音乐签证等注意力相关配置。</p>
+                <h2 class="m3-title">API 配置</h2>
+                <p class="m3-desc" style="text-align: center; margin-bottom: 12px;">修改AI API相关设置</p>
 ${getApiConfigFieldsHtml(currentApi, 'm3-api-cfg')}
                 <div style="margin-top: 16px; display: flex; justify-content: center;"><button class="m3-button tonal" id="m3-api-cfg-cancel">取消</button><button class="m3-button primary" id="m3-api-cfg-save">保存 API 配置</button></div>
             </div>
