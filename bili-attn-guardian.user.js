@@ -78,8 +78,8 @@
     const getAllowedCategories = () => normalizeAllowedCategories(GM_getValue('ai_focus_allowed_categories', DEFAULT_ALLOWED_CATEGORIES));
 
     const getVisaConfig = () => ({
-        duration: GM_getValue('ai_focus_music_duration', 5), 
-        cooldown: GM_getValue('ai_focus_music_cooldown', 60) 
+        duration: GM_getValue('ai_focus_music_duration', 5),
+        cooldown: GM_getValue('ai_focus_music_cooldown', 60)
     });
 
     const LOG_PREFIX = '[哔哩哔哩审判庭]';
@@ -198,7 +198,7 @@
 标签：${tags || '(空)'}`;
 
     // ==========================================
-    // 🎬 播放器控制封装 
+    // 🎬 播放器控制封装
     // ==========================================
     const getMainVideoElement = () => document.querySelector('.bpx-player-video-area video') || document.querySelector('video');
 
@@ -257,6 +257,9 @@
             #m3-toast.success { background-color: var(--md-sys-color-success-container); color: var(--md-sys-color-on-success-container); }
             .m3-toast-close { cursor: pointer; font-weight: 600; font-size: 16px; opacity: 0.6; transition: opacity 0.2s; }
             .m3-toast-close:hover { opacity: 1; }
+            #m3-api-config-fab { position: fixed; left: 16px; bottom: 16px; width: 44px; height: 44px; border: none; border-radius: 16px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font-size: 23px; line-height: 1; display: flex; align-items: center; justify-content: center; box-shadow: var(--md-sys-elevation-3); cursor: pointer; z-index: 999998; transition: transform 0.2s ease, background-color 0.2s ease, opacity 0.2s ease; }
+            #m3-api-config-fab:hover { background-color: #553F88; transform: translateY(-1px); }
+            #m3-api-config-fab:active { transform: scale(0.96); }
         `;
         (document.head || document.documentElement).appendChild(style);
     };
@@ -270,6 +273,156 @@
         void toast.offsetWidth; toast.classList.add('show');
         if (toast.hideTimer) clearTimeout(toast.hideTimer);
         toast.hideTimer = setTimeout(() => toast.classList.remove('show'), message.length > 20 ? 8000 : 5000);
+    };
+
+    const getModelsEndpoint = (endpoint) => {
+        const trimmedEndpoint = String(endpoint || '').trim();
+        if (!trimmedEndpoint) return '';
+        return trimmedEndpoint.replace(/\/chat\/completions\/?(\?.*)?$/i, '/models$1');
+    };
+
+    const getApiConfigFieldsHtml = (currentApi, idPrefix = 'm3-cfg') => `
+                <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
+                    <label class="group-title">API Key</label><input type="password" id="${idPrefix}-key" value="${escapeHtml(currentApi.key)}" placeholder="sk-...">
+                </div>
+                <div class="m3-input-group" style="margin-bottom: 12px;">
+                    <label class="group-title">API Endpoint (如: https://api.openai.com/v1/chat/completions)</label><input type="text" id="${idPrefix}-endpoint" value="${escapeHtml(currentApi.endpoint)}">
+                </div>
+
+                <div class="m3-input-group" style="margin-bottom: 12px;">
+                    <label class="group-title">Model (大语言模型)</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="${idPrefix}-model" value="${escapeHtml(currentApi.model)}" list="${idPrefix}-model-list" style="flex: 1;" placeholder="手动输入或点击右侧拉取">
+                        <button class="m3-button tonal" id="${idPrefix}-fetch-models" style="margin: 0; padding: 0 16px; flex-shrink: 0;">拉取列表</button>
+                    </div>
+                    <datalist id="${idPrefix}-model-list"></datalist>
+                </div>
+
+                <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
+                    <label class="group-title">备用 API Key（可选，仅主 API 失败时使用）</label><input type="password" id="${idPrefix}-backup-key" value="${escapeHtml(currentApi.backupKey)}" placeholder="sk-...">
+                </div>
+                <div class="m3-input-group" style="margin-bottom: 12px;">
+                    <label class="group-title">备用 API Endpoint</label><input type="text" id="${idPrefix}-backup-endpoint" value="${escapeHtml(currentApi.backupEndpoint)}" placeholder="https://backup.example.com/v1/chat/completions">
+                </div>
+                <div class="m3-input-group" style="margin-bottom: 12px;">
+                    <label class="group-title">备用 Model</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="${idPrefix}-backup-model" value="${escapeHtml(currentApi.backupModel)}" list="${idPrefix}-backup-model-list" style="flex: 1;" placeholder="备用模型名称">
+                        <button class="m3-button tonal" id="${idPrefix}-fetch-backup-models" style="margin: 0; padding: 0 16px; flex-shrink: 0;">拉取列表</button>
+                    </div>
+                    <datalist id="${idPrefix}-backup-model-list"></datalist>
+                </div>`;
+
+    const fetchModelsForConfig = ({ key, endpoint, button, datalist, modelInput, targetLabel }) => {
+        if (!key || !endpoint) return showToast(`请先填写 ${targetLabel} API Key 和 Endpoint`, "error");
+
+        const modelsUrl = getModelsEndpoint(endpoint);
+        const defaultButtonText = button.innerText;
+        button.innerText = "拉取中...";
+        button.disabled = true;
+
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: modelsUrl,
+            headers: {
+                "Authorization": `Bearer ${key}`,
+                "Content-Type": "application/json"
+            },
+            onload: function(response) {
+                button.innerText = defaultButtonText;
+                button.disabled = false;
+                if (response.status === 200) {
+                    try {
+                        const resJson = JSON.parse(response.responseText);
+                        const modelIds = (resJson.data || []).map(m => m?.id).filter(Boolean);
+                        const uniqueModelIds = Array.from(new Set(modelIds)).sort();
+                        if (uniqueModelIds.length === 0) return showToast(`${targetLabel} 拉取成功，但该供应商模型列表为空`, "error");
+
+                        datalist.innerHTML = '';
+                        uniqueModelIds.forEach(modelId => {
+                            const option = document.createElement('option');
+                            option.value = modelId;
+                            datalist.appendChild(option);
+                        });
+
+                        showToast(`✅ ${targetLabel} 成功获取 ${uniqueModelIds.length} 个模型！请点击输入框下拉选择。`, "success");
+                        modelInput.value = "";
+                        modelInput.focus();
+                        modelInput.click();
+                    } catch (e) {
+                        logError(`${targetLabel} 模型列表解析失败`, e);
+                        showToast("解析数据失败，API 格式不兼容标准规范", "error");
+                    }
+                } else {
+                    logError(`${targetLabel} 模型列表拉取失败，状态码: ${response.status}`, response.responseText);
+                    showToast(`${targetLabel} 拉取失败，状态码: ${response.status}`, "error");
+                }
+            },
+            onerror: function(error) {
+                button.innerText = defaultButtonText;
+                button.disabled = false;
+                logError(`${targetLabel} 模型列表网络请求失败`, error);
+                showToast(`${targetLabel} 网络请求失败，请检查网络或跨域限制`, "error");
+            }
+        });
+    };
+
+    const bindModelFetchButton = ({ idPrefix, backup = false, targetLabel }) => {
+        const suffix = backup ? 'backup-' : '';
+        const button = document.getElementById(`${idPrefix}-fetch-${suffix}models`);
+        if (!button) return;
+        button.onclick = () => {
+            const keyInput = document.getElementById(`${idPrefix}-${suffix}key`);
+            const endpointInput = document.getElementById(`${idPrefix}-${suffix}endpoint`);
+            const modelInput = document.getElementById(`${idPrefix}-${suffix}model`);
+            const datalist = document.getElementById(`${idPrefix}-${suffix}model-list`);
+            if (!keyInput || !endpointInput || !modelInput || !datalist) return showToast("配置表单初始化失败", "error");
+            fetchModelsForConfig({
+                key: keyInput.value.trim(),
+                endpoint: endpointInput.value.trim(),
+                button,
+                datalist,
+                modelInput,
+                targetLabel
+            });
+        };
+    };
+
+    const bindApiConfigModelFetchers = (idPrefix = 'm3-cfg') => {
+        bindModelFetchButton({ idPrefix, targetLabel: '主 API' });
+        bindModelFetchButton({ idPrefix, backup: true, targetLabel: '备用 API' });
+    };
+
+    const readApiConfigFromForm = (idPrefix = 'm3-cfg') => {
+        const readInput = (suffix) => document.getElementById(`${idPrefix}-${suffix}`)?.value.trim() || '';
+        return {
+            key: readInput('key'),
+            endpoint: readInput('endpoint'),
+            model: readInput('model'),
+            backupKey: readInput('backup-key'),
+            backupEndpoint: readInput('backup-endpoint'),
+            backupModel: readInput('backup-model')
+        };
+    };
+
+    const validateAndSaveApiConfigFromForm = (idPrefix = 'm3-cfg') => {
+        const api = readApiConfigFromForm(idPrefix);
+        if (!api.key) { showToast("API Key 不能为空", "error"); return false; }
+        if (!api.endpoint) { showToast("API Endpoint 不能为空", "error"); return false; }
+        if (!api.model) { showToast("模型名称不能为空", "error"); return false; }
+        const hasAnyBackupConfig = Boolean(api.backupKey || api.backupEndpoint || api.backupModel);
+        if (hasAnyBackupConfig && (!api.backupKey || !api.backupEndpoint || !api.backupModel)) {
+            showToast("备用 API 需同时填写 Key、Endpoint 和 Model", "error");
+            return false;
+        }
+
+        GM_setValue('ai_focus_key', api.key);
+        GM_setValue('ai_focus_endpoint', api.endpoint);
+        GM_setValue('ai_focus_model', api.model);
+        GM_setValue('ai_focus_backup_key', api.backupKey);
+        GM_setValue('ai_focus_backup_endpoint', api.backupEndpoint);
+        GM_setValue('ai_focus_backup_model', api.backupModel);
+        return true;
     };
 
     // ==========================================
@@ -306,141 +459,74 @@ ${categoryCheckboxHtml}
                     <label class="group-title">⏳ 音乐签证冷却时间 (分钟)：</label>
                     <input type="number" id="m3-cfg-music-cooldown" value="${currentVisa.cooldown}" min="1">
                 </div>
-                <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
-                    <label class="group-title">API Key</label><input type="password" id="m3-cfg-key" value="${currentApi.key}" placeholder="sk-...">
-                </div>
-                <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">API Endpoint (如: https://api.openai.com/v1/chat/completions)</label><input type="text" id="m3-cfg-endpoint" value="${currentApi.endpoint}">
-                </div>
-                
-                <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">Model (大语言模型)</label>
-                    <div style="display: flex; gap: 8px;">
-                        <input type="text" id="m3-cfg-model" value="${currentApi.model}" list="m3-model-list" style="flex: 1;" placeholder="手动输入或点击右侧拉取">
-                        <button class="m3-button tonal" id="m3-cfg-fetch-models" style="margin: 0; padding: 0 16px; flex-shrink: 0;">拉取列表</button>
-                    </div>
-                    <datalist id="m3-model-list"></datalist>
-                </div>
-
-                <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
-                    <label class="group-title">备用 API Key（可选，仅主 API 失败时使用）</label><input type="password" id="m3-cfg-backup-key" value="${currentApi.backupKey}" placeholder="sk-...">
-                </div>
-                <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">备用 API Endpoint</label><input type="text" id="m3-cfg-backup-endpoint" value="${currentApi.backupEndpoint}" placeholder="https://backup.example.com/v1/chat/completions">
-                </div>
-                <div class="m3-input-group" style="margin-bottom: 12px;">
-                    <label class="group-title">备用 Model</label><input type="text" id="m3-cfg-backup-model" value="${currentApi.backupModel}" placeholder="备用模型名称">
-                </div>
+${getApiConfigFieldsHtml(currentApi, 'm3-cfg')}
 
                 <div style="margin-top: 16px; display: flex; justify-content: center;"><button class="m3-button tonal" id="m3-cfg-cancel">取消</button><button class="m3-button primary" id="m3-cfg-save">保存配置</button></div>
             </div>
         `;
         appendUiElement(mask);
         setTimeout(() => mask.classList.add('show'), 10);
-        
+
         document.getElementById('m3-cfg-cancel').onclick = () => { mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); };
-        
-        // --- 拉取模型列表核心逻辑 ---
-        document.getElementById('m3-cfg-fetch-models').onclick = () => {
-            const key = document.getElementById('m3-cfg-key').value.trim();
-            const endpoint = document.getElementById('m3-cfg-endpoint').value.trim();
-            const btn = document.getElementById('m3-cfg-fetch-models');
-
-            if (!key || !endpoint) return showToast("请先填写 API Key 和 Endpoint", "error");
-
-            // 智能推导 models 接口地址 (将 /chat/completions 替换为 /models)
-            let modelsUrl = endpoint.replace(/\/chat\/completions\/?$/i, '/models');
-
-            btn.innerText = "拉取中...";
-            btn.disabled = true;
-
-            GM_xmlhttpRequest({
-                method: "GET",
-                url: modelsUrl,
-                headers: {
-                    "Authorization": `Bearer ${key}`,
-                    "Content-Type": "application/json"
-                },
-                onload: function(response) {
-                    btn.innerText = "拉取列表";
-                    btn.disabled = false;
-                    if (response.status === 200) {
-                        try {
-                            const resJson = JSON.parse(response.responseText);
-                            const models = resJson.data || [];
-                            if (models.length === 0) return showToast("拉取成功，但该供应商模型列表为空", "error");
-
-                            const datalist = document.getElementById('m3-model-list');
-                            datalist.innerHTML = ''; // 清空旧列表
-                            
-                            // 解析并填充选项
-                            models.forEach(m => {
-                                if (m.id) {
-                                    const option = document.createElement('option');
-                                    option.value = m.id;
-                                    datalist.appendChild(option);
-                                }
-                            });
-                            
-                            showToast(`✅ 成功获取 ${models.length} 个模型！请点击输入框下拉选择。`, "success");
-                            
-                            // 自动将焦点放回输入框，并触发点击效果方便展开下拉
-                            const modelInput = document.getElementById('m3-cfg-model');
-                            modelInput.value = ""; // 清空当前方便下拉
-                            modelInput.focus();
-                            modelInput.click();
-
-                        } catch (e) {
-                            logError("模型列表解析失败", e);
-                            showToast("解析数据失败，API 格式不兼容标准规范", "error");
-                        }
-                    } else {
-                        logError(`模型列表拉取失败，状态码: ${response.status}`, response.responseText);
-                        showToast(`拉取失败，状态码: ${response.status}`, "error");
-                    }
-                },
-                onerror: function(error) {
-                    btn.innerText = "拉取列表";
-                    btn.disabled = false;
-                    logError("模型列表网络请求失败", error);
-                    showToast("网络请求失败，请检查网络或跨域限制", "error");
-                }
-            });
-        };
+        bindApiConfigModelFetchers('m3-cfg');
 
         // --- 保存逻辑 ---
         document.getElementById('m3-cfg-save').onclick = () => {
-            const newKey = document.getElementById('m3-cfg-key').value.trim();
-            const newModel = document.getElementById('m3-cfg-model').value.trim();
-            const newBackupKey = document.getElementById('m3-cfg-backup-key').value.trim();
-            const newBackupEndpoint = document.getElementById('m3-cfg-backup-endpoint').value.trim();
-            const newBackupModel = document.getElementById('m3-cfg-backup-model').value.trim();
-            if (!newKey) return showToast("API Key 不能为空", "error");
-            if (!newModel) return showToast("模型名称不能为空", "error");
-            const hasAnyBackupConfig = Boolean(newBackupKey || newBackupEndpoint || newBackupModel);
-            if (hasAnyBackupConfig && (!newBackupKey || !newBackupEndpoint || !newBackupModel)) return showToast("备用 API 需同时填写 Key、Endpoint 和 Model", "error");
-            
+            if (!validateAndSaveApiConfigFromForm('m3-cfg')) return;
+
             let nVal = parseInt(document.getElementById('m3-cfg-music-duration').value) || 5;
             if (nVal < 1) nVal = 1; if (nVal > 10) nVal = 10;
             let mVal = parseInt(document.getElementById('m3-cfg-music-cooldown').value) || 60;
             if (mVal < 1) mVal = 1;
 
             const newAllowed = Array.from(document.querySelectorAll('.m3-cat-cb')).filter(cb => cb.checked).map(cb => cb.value);
-            
-            GM_setValue('ai_focus_allowed_categories', newAllowed); 
-            GM_setValue('ai_focus_music_duration', nVal); 
+
+            GM_setValue('ai_focus_allowed_categories', newAllowed);
+            GM_setValue('ai_focus_music_duration', nVal);
             GM_setValue('ai_focus_music_cooldown', mVal);
-            GM_setValue('ai_focus_key', newKey); 
-            GM_setValue('ai_focus_endpoint', document.getElementById('m3-cfg-endpoint').value.trim()); 
-            GM_setValue('ai_focus_model', newModel);
-            GM_setValue('ai_focus_backup_key', newBackupKey);
-            GM_setValue('ai_focus_backup_endpoint', newBackupEndpoint);
-            GM_setValue('ai_focus_backup_model', newBackupModel);
-            
+
             mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); showToast("配置已保存", "success");
         };
     };
+
+    const openApiSettings = () => {
+        injectM3Style();
+        if (document.getElementById('m3-api-settings-mask')) return;
+        const currentApi = getApiConfig();
+        const mask = document.createElement('div'); mask.id = 'm3-api-settings-mask'; mask.className = 'm3-overlay';
+        mask.innerHTML = `
+            <div class="m3-card" style="max-height: 95vh;">
+                <h2 class="m3-title">审判庭 API 配置</h2>
+                <p class="m3-desc" style="text-align: center; margin-bottom: 12px;">这里只修改主 API 与备用 API，不会变更放行分类、音乐签证等注意力相关配置。</p>
+${getApiConfigFieldsHtml(currentApi, 'm3-api-cfg')}
+                <div style="margin-top: 16px; display: flex; justify-content: center;"><button class="m3-button tonal" id="m3-api-cfg-cancel">取消</button><button class="m3-button primary" id="m3-api-cfg-save">保存 API 配置</button></div>
+            </div>
+        `;
+        appendUiElement(mask);
+        setTimeout(() => mask.classList.add('show'), 10);
+        document.getElementById('m3-api-cfg-cancel').onclick = () => { mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); };
+        bindApiConfigModelFetchers('m3-api-cfg');
+        document.getElementById('m3-api-cfg-save').onclick = () => {
+            if (!validateAndSaveApiConfigFromForm('m3-api-cfg')) return;
+            mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); showToast("API 配置已保存", "success");
+        };
+    };
+
+    const ensureApiConfigFab = () => {
+        injectM3Style();
+        if (document.getElementById('m3-api-config-fab')) return;
+        const fab = document.createElement('button');
+        fab.id = 'm3-api-config-fab';
+        fab.type = 'button';
+        fab.title = '打开审判庭 API 配置';
+        fab.setAttribute('aria-label', '打开审判庭 API 配置');
+        fab.textContent = '⚖';
+        fab.onclick = openApiSettings;
+        appendUiElement(fab);
+    };
+
     GM_registerMenuCommand("配置 AI 专注 API 与分类", openSettings);
+    GM_registerMenuCommand("配置 AI API（仅 API）", openApiSettings);
 
     // ==========================================
     // 🧠 AI 判断逻辑
@@ -526,13 +612,19 @@ ${categoryCheckboxHtml}
             const error = new Error("未配置 API Key");
             logError(`${contextLabel}失败`, error);
             showToast("未配置 API Key", "error");
-            openSettings();
+            openApiSettings();
+            throw error;
+        }
+        if (!api.endpoint) {
+            const error = new Error("未配置 API Endpoint");
+            logError(`${contextLabel}失败`, error);
+            openApiSettings();
             throw error;
         }
         if (!api.model) {
             const error = new Error("未配置模型名称");
             logError(`${contextLabel}失败`, error);
-            openSettings();
+            openApiSettings();
             throw error;
         }
 
@@ -601,7 +693,7 @@ ${categoryCheckboxHtml}
         setTimeout(() => mask.classList.add('show'), 10);
         if (!window.pauseInterval) window.pauseInterval = setInterval(forcePauseVideo, 100);
         showToast(message, "error");
-        document.getElementById('m3-error-settings').onclick = openSettings;
+        document.getElementById('m3-error-settings').onclick = openApiSettings;
         document.getElementById('m3-error-retry').onclick = () => triggerMainDebounced(true);
     };
 
@@ -826,6 +918,7 @@ ${categoryCheckboxHtml}
     };
 
     const handleVideoRouteChange = () => {
+        ensureApiConfigFab();
         const currentVideoId = extractVideoId(location.href);
         if (currentVideoId && currentVideoId !== lastVideoId) {
             lastVideoId = currentVideoId;
@@ -846,6 +939,7 @@ ${categoryCheckboxHtml}
     });
 
     const startGuardian = () => {
+        ensureApiConfigFab();
         const currentVideoId = extractVideoId(location.href);
         if (!currentVideoId) return;
         lastVideoId = currentVideoId;
