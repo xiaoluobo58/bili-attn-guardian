@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.3.5
+// @version      1.3.7
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
-// @author       Misaka Milobo(By Gemini and ChatGPT)
+// @author       Misaka Milobo(By Gemini Pro and ChatGPT and Claude Code)
 // @match        *://*.bilibili.com/video/*
 // @homepageURL  https://www.milobo.moe
 // @grant        GM_xmlhttpRequest
@@ -35,6 +35,7 @@
     const CATEGORY_OPTIONS = [
         { value: 'LEARNING-COMMON', label: '通用学习', description: '学习性内容或者和学业有关的内容，例如网课、高中学习经验分享、语言学习技巧、高中心态调整教程、自然科学、留学申请等，非计算机类' },
         { value: 'LEARNING-CS', label: '计算机学习', description: '计算机科学学习性内容，例如编程、Godot/C++、算法、操作系统、网络、数据库、AI 原理等' },
+        { value: 'LIFE-PRACTICAL', label: '生活实用', description: '与日常生活直接相关、能提高生活效率或解决实际问题的内容，例如收纳整理、家务技巧、做饭、清洁、购物、理财、居家维修、通勤、证件办理、生活经验分享等' },
         { value: 'GAME-GUIDE', label: '游戏干货', description: '属于游戏类且偏干货的内容，如攻略、机制分析、版本快照、配装路线等，再例如 Minecraft 更新介绍' },
         { value: 'GAME-ENTERTAINMENT', label: '游戏娱乐', description: '属于游戏类且偏娱乐的内容，如游戏实况、玩梗、剪辑、整活、主播切片、搞笑合集等' },
         { value: 'TECH-NEWS', label: '科技资讯', description: '科技新闻、AI 快报、产品发布、行业动态等非教程内容' },
@@ -42,7 +43,7 @@
         { value: 'LOW_VALUE', label: '低价值注意力劫持', description: '标题党、爽文解说、MEME、玩梗鬼畜视频、地缘政治、新闻、吃瓜等' },
         { value: 'UNKNOWN', label: '信息不足', description: '信息不足或难以可靠判断' }
     ];
-    const DEFAULT_ALLOWED_CATEGORIES = ['LEARNING-COMMON', 'LEARNING-CS', 'GAME-GUIDE', 'TECH-NEWS'];
+    const DEFAULT_ALLOWED_CATEGORIES = ['LEARNING-COMMON', 'LEARNING-CS', 'LIFE-PRACTICAL', 'GAME-GUIDE', 'TECH-NEWS'];
     const VALID_CATEGORIES = CATEGORY_OPTIONS.map(option => option.value);
     const CATEGORY_MAP = CATEGORY_OPTIONS.reduce((map, option) => {
         map[option.value] = option.label;
@@ -51,6 +52,9 @@
     const CATEGORY_ALIAS_MAP = {
         'ACADEMIC': 'LEARNING-COMMON',
         'PRACTICAL': 'LEARNING-COMMON',
+        'LIFE_PRACTICAL': 'LIFE-PRACTICAL',
+        'LIFE-PRACTICAL': 'LIFE-PRACTICAL',
+        'LIFE PRACTICAL': 'LIFE-PRACTICAL',
         'GAME_GUIDE': 'GAME-GUIDE',
         'GAME_ENTERTAINMENT': 'GAME-ENTERTAINMENT',
         'TECH_REVIEW': 'TECH-NEWS',
@@ -143,7 +147,7 @@
             }
         }
 
-        const match = rawContent.match(/LEARNING[-_]COMMON|LEARNING[-_]CS|GAME[-_]GUIDE|GAME[-_]ENTERTAINMENT|TECH[-_]NEWS|LOW[_-]VALUE|UNKNOWN|MUSIC|ACADEMIC|PRACTICAL|GAME_GUIDE|TECH_REVIEW|HIJACKING|TOXIC/i);
+        const match = rawContent.match(/LEARNING[-_]COMMON|LEARNING[-_]CS|LIFE[-_ ]PRACTICAL|GAME[-_]GUIDE|GAME[-_]ENTERTAINMENT|TECH[-_]NEWS|LOW[_-]VALUE|UNKNOWN|MUSIC|ACADEMIC|PRACTICAL|GAME_GUIDE|TECH_REVIEW|HIJACKING|TOXIC/i);
         if (match) return createReviewResult(match[0], 0.5, 'AI 返回了旧式分类结果，缺少详细理由。');
         return useUnknownFallback ? createReviewResult('UNKNOWN', 0, 'AI 未按预期 JSON 格式返回，已按信息不足处理。') : null;
     };
@@ -170,21 +174,24 @@
 
 2. LEARNING-CS：计算机科学与软件开发学习类。包括 C/C++/Python/JavaScript 等编程教程，Godot/Unity/Unreal 游戏开发教程，算法与数据结构，计算机组成原理，操作系统，网络，数据库，软件工程，前后端开发，运维，信息安全，AI/机器学习原理或工程实践，项目实战与问题排查。必须具有明确学习、教程、原理解释或实操价值；不包含 AI 快报、产品发布、行业新闻、单纯工具资讯。
 
-3. GAME-GUIDE：游戏干货类。包括游戏攻略、机制分析、版本更新/快照介绍、Minecraft 更新快照解析、红石/建筑教程、配装、路线、地图、技巧、数据分析、效率提升等有明确信息价值的游戏内容。不包含游戏实况、玩梗、整活、搞笑剪辑、主播切片、纯娱乐挑战。
+3. LIFE-PRACTICAL：生活实用类。包括与日常生活直接相关、能提高生活效率或解决实际问题的内容，例如收纳整理、做饭、清洁、购物、理财、家务技巧、居家维修、通勤、证件办理、生活经验分享等。它强调“实际可用”，但不等同于系统课程或学科知识；如果内容核心是学科/课程/系统学习，则优先归入 LEARNING-COMMON。
 
-4. GAME-ENTERTAINMENT：游戏娱乐类。包括游戏实况、主播切片、玩梗视频、整活、搞笑剪辑、挑战娱乐、Reaction、二创混剪、游戏剧情吐槽等以娱乐为主要目的的游戏内容。即使包含少量技巧，只要核心是娱乐消费，也归入此类。
+4. GAME-GUIDE：游戏干货类。包括游戏攻略、机制分析、版本更新/快照介绍、Minecraft 更新快照解析、红石/建筑教程、配装、路线、地图、技巧、数据分析、效率提升等有明确信息价值的游戏内容。不包含游戏实况、玩梗、整活、搞笑剪辑、主播切片、纯娱乐挑战。
 
-5. TECH-NEWS：科技非学习类。包括科技新闻、AI 快报、产品发布、硬件/软件资讯、行业动态、公司新闻、发布会总结、趋势观察、工具推荐或泛泛评测。不等同于教程；如果核心是在教用户掌握原理或技能，应归入 LEARNING-CS。
+5. GAME-ENTERTAINMENT：游戏娱乐类。包括游戏实况、主播切片、玩梗视频、整活、搞笑剪辑、挑战娱乐、Reaction、二创混剪、游戏剧情吐槽等以娱乐为主要目的的游戏内容。即使包含少量技巧，只要核心是娱乐消费，也归入此类。
 
-6. MUSIC：音乐放松类。包括音乐、MV、翻唱、演奏、音乐会、歌单、白噪音、环境音等以聆听和放松为目的的内容。
+6. TECH-NEWS：科技非学习类。包括科技新闻、AI 快报、产品发布、硬件/软件资讯、行业动态、公司新闻、发布会总结、趋势观察、工具推荐或泛泛评测。不等同于教程；如果核心是在教用户掌握原理或技能，应归入 LEARNING-CS。
 
-7. LOW_VALUE：低价值注意力劫持类。包括标题党、爽文解说、短平快刺激、MEME 玩梗、地缘政治、争议新闻、吃瓜、情绪煽动、对立引战、猎奇、阴谋论、营销号、明显为了消耗注意力而设计的内容。若视频同时包含一点知识信息但主要依赖冲突、猎奇、愤怒或爽感吸引点击，归入此类。
+7. MUSIC：音乐放松类。包括音乐、MV、翻唱、演奏、音乐会、歌单、白噪音、环境音等以聆听和放松为目的的内容。
 
-8. UNKNOWN：信息不足或难以可靠判断。标题、简介和标签无法支持稳定判断时使用；不要为了凑分类而猜测。
+8. LOW_VALUE：低价值注意力劫持类。包括标题党、爽文解说、短平快刺激、MEME 玩梗、地缘政治、争议新闻、吃瓜、情绪煽动、对立引战、猎奇、阴谋论、营销号、明显为了消耗注意力而设计的内容。若视频同时包含一点知识信息但主要依赖冲突、猎奇、愤怒或爽感吸引点击，归入此类。
+
+9. UNKNOWN：信息不足或难以可靠判断。标题、简介和标签无法支持稳定判断时使用；不要为了凑分类而猜测。
 
 判断优先级：
 - 明确教程、课程、系统知识、可复用技能优先归入学习类。
 - 计算机/编程/软件/AI/Godot/C++ 等学习内容优先归入 LEARNING-CS，而不是 LEARNING-COMMON。
+- 日常生活技巧、效率经验和实际操作方法优先归入 LIFE-PRACTICAL；如果是系统课程、学科知识或专业教学，则仍按学习类处理。
 - 游戏内容先区分是否有明确攻略/机制/版本信息价值；没有则归入 GAME-ENTERTAINMENT。
 - 新闻、快报、争议、地缘政治、吃瓜和情绪消费通常不是学习内容；符合注意力劫持特征时归入 LOW_VALUE。
 - 不确定时使用 UNKNOWN。
