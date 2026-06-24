@@ -459,8 +459,8 @@ ${categoryCheckboxHtml}
                     </div>
                 </div>
                 <div class="m3-input-group" style="border-top: 1px solid #E7E0EC; padding-top: 12px; margin-bottom: 12px;">
-                    <label class="group-title">🎵 音乐签证单次时长 (1-10，分钟)：</label>
-                    <input type="number" id="m3-cfg-music-duration" value="${currentVisa.duration}" min="1" max="10">
+                    <label class="group-title">🎵 音乐签证单次时长 (1-20，分钟)：</label>
+                    <input type="number" id="m3-cfg-music-duration" value="${currentVisa.duration}" min="1" max="20">
                 </div>
                 <div class="m3-input-group" style="margin-bottom: 12px;">
                     <label class="group-title">⏳ 音乐签证冷却时间 (分钟)：</label>
@@ -482,7 +482,7 @@ ${getApiConfigFieldsHtml(currentApi, 'm3-cfg')}
             if (!validateAndSaveApiConfigFromForm('m3-cfg')) return;
 
             let nVal = parseInt(document.getElementById('m3-cfg-music-duration').value) || 5;
-            if (nVal < 1) nVal = 1; if (nVal > 10) nVal = 10;
+            if (nVal < 1) nVal = 1; if (nVal > 20) nVal = 20;
             let mVal = parseInt(document.getElementById('m3-cfg-music-cooldown').value) || 60;
             if (mVal < 1) mVal = 1;
 
