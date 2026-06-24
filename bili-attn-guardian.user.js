@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.3.7
+// @version      1.3.8
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini Pro and ChatGPT and Claude Code)
 // @match        *://*.bilibili.com/video/*
