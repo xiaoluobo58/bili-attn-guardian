@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.3.8
+// @version      1.3.9
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini Pro and ChatGPT and Claude Code)
 // @match        *://*.bilibili.com/video/*
@@ -665,9 +665,64 @@ ${getApiConfigFieldsHtml(currentApi, 'm3-api-cfg')}
         return review;
     };
 
-    const appealVideoWithAI = async (title, desc, tags, reason, retryCount = 1) => {
-        const prompt = `复审官。基于视频和用户理由判断。批准回复:APPROVED，驳回回复:REJECTED|理由。标题:${title} 简介:${desc} 标签:${tags} 理由:${reason}`;
-        return requestChatCompletion([{ role: "user", content: prompt }], "AI 复审", retryCount);
+    const createAppealReviewPrompt = (allowedCategories) => {
+        const allowedList = (allowedCategories || []).map(v => `- ${v}（${CATEGORY_MAP[v] || v}）`).join('\n') || '- 无';
+        return `你是一名社交媒体申诉复审官。用户正在使用一款注意力保护插件，因为视频命中需要拦截的分类而被拦截。TA现在提出申诉，你需要根据视频信息、AI 初审结果和用户申诉理由，判断是否批准放行。
+
+你的任务可以是重新判断视频分类，也可以是评估用户理由是否充分、真实，足以支撑此次观看的必要性。
+
+以下是初审使用的分类定义，供你理解视频被拦截的背景：
+
+1. LEARNING-COMMON：通用学习类。课程、讲座、系统知识体系讲解、备考、语言、数学、物理、化学、生物、历史、哲学、经济、人文社科、自然科学等。不含编程/计算机/软件/AI；不含泛娱乐科普、新闻或碎片谈资。
+
+2. LEARNING-CS：计算机科学与软件开发学习类。编程教程、游戏开发教程、算法、操作系统、网络、数据库、AI/ML 工程、项目实战。必须有明确教学或实操价值；不含快报、产品发布、行业新闻。
+
+3. LIFE-PRACTICAL：生活实用类。收纳、烹饪、理财、家务技巧、证件办理、生活经验等可直接提升生活效率的内容。
+
+4. GAME-GUIDE：游戏干货类。攻略、机制分析、版本更新解析、红石/建筑教程、配装、技巧、数据分析等有明确信息价值的游戏内容。
+
+5. GAME-ENTERTAINMENT：游戏娱乐类。实况、主播切片、玩梗、整活、搞笑剪辑、挑战、Reaction、二创等以娱乐为主要目的的游戏内容。
+
+6. TECH-NEWS：科技资讯类。科技新闻、AI 快报、产品发布、硬件资讯、行业动态、工具推荐、泛泛评测等。
+
+7. MUSIC：音乐放松类。音乐、MV、翻唱、演奏、音乐会、歌单、白噪音等以聆听和放松为目的的内容。
+
+8. LOW_VALUE：低价值注意力劫持类。标题党、爽文解说、MEME、地缘政治、争议新闻、吃瓜、情绪煽动、营销号等以消耗注意力为目的的内容。
+
+9. UNKNOWN：信息不足或难以判断。
+
+以下是用户插件设置中已批准放行的分类（若复审后认定视频实际属于这些分类之一，可直接批准，无需苛求理由）：
+${allowedList}
+
+申诉审核标准：
+
+批准条件（须同时满足）：
+- 用户理由具体，能与视频内容直接关联。
+- 用户说明了当前观看此视频的真实必要性（如学习需要、任务要求、参考资料等）。
+- 理由可信，非刻意规避拦截的套话。
+
+驳回条件（满足任一即驳回）：
+- 理由含糊，例如"我就是想看"、"这个有用"、"无聊"。
+- 理由与视频内容无关。
+- 理由是无意义字符、数字或重复内容。
+- 用户仅复述视频标题或分类，未说明必要性。
+- 理由过于主观，不足以证明当前观看的合理性。
+
+输出格式：
+- 批准：APPROVED
+- 驳回：REJECTED|一句中文驳回理由
+
+不要输出其他内容。`;
+    };
+
+    const appealVideoWithAI = async (title, desc, tags, reason, initialReview, allowedCategories, retryCount = 1) => {
+        const review = normalizeReviewResult(initialReview);
+        const initialInfo = review ? `\nAI 初审分类：${review.category}（${CATEGORY_MAP[review.category] || review.category}），初审理由：${review.reason || '无'}` : '';
+        const prompt = `视频标题：${title || '(空)'}\n简介：${desc || '(空)'}\n标签：${tags || '(空)'}${initialInfo}\n\n用户申诉理由：${reason}`;
+        return requestChatCompletion([
+            { role: "system", content: createAppealReviewPrompt(allowedCategories) },
+            { role: "user", content: prompt }
+        ], "AI 复审", retryCount);
     };
 
     // ==========================================
@@ -705,6 +760,7 @@ ${getApiConfigFieldsHtml(currentApi, 'm3-api-cfg')}
     };
 
     const showBlocker = (reviewInput, title, desc, tags, currentVideoId) => {
+        if (window.appealInProgress) return;
         injectM3Style();
         let mask = document.getElementById('ai-focus-mask');
         if (!mask) { mask = document.createElement('div'); mask.id = 'ai-focus-mask'; mask.className = 'm3-overlay'; appendUiElement(mask); }
@@ -721,8 +777,8 @@ ${getApiConfigFieldsHtml(currentApi, 'm3-api-cfg')}
         if (isMusic) {
             let now = Date.now();
             let lastTime = GM_getValue('ai_focus_music_last_time', 0);
-            canApplyMusic = (now - lastTime) >= visaCfg.cooldown * 60 * 1000;
-            let cdRemaining = Math.ceil((visaCfg.cooldown * 60 * 1000 - (now - lastTime)) / 60000);
+            canApplyMusic = (now - lastTime) >= (visaCfg.duration + visaCfg.cooldown) * 60 * 1000;
+            let cdRemaining = Math.ceil(((visaCfg.duration + visaCfg.cooldown) * 60 * 1000 - (now - lastTime)) / 60000);
             
             let btnText = canApplyMusic ? `🎸 申请音乐签证 (${visaCfg.duration}分钟)` : `⏳ 音乐签证冷却中 (${cdRemaining}分钟)`;
             let btnStyle = canApplyMusic ? `background-color: #006A6A; color: white;` : ``;
@@ -770,19 +826,22 @@ ${getApiConfigFieldsHtml(currentApi, 'm3-api-cfg')}
         document.getElementById('m3-appeal-submit').onclick = async () => {
             const btn = document.getElementById('m3-appeal-submit'); const input = document.getElementById('m3-appeal-reason');
             if (!input.value.trim()) return showToast("请输入理由。", "error");
+            window.appealInProgress = true;
             btn.innerText = "裁判中..."; btn.disabled = true; input.disabled = true;
             try {
-                const appealResult = await appealVideoWithAI(title, desc, tags, input.value.trim());
+                const appealResult = await appealVideoWithAI(title, desc, tags, input.value.trim(), review, getAllowedCategories());
                 if (appealResult.toUpperCase().startsWith('APPROVED')) {
                     GM_setValue(`ai_focus_cache_${currentVideoId}`, serializeReviewResult(createReviewResult(APPROVED_BY_APPEAL, 1, '申诉已通过，允许观看。')));
                     if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
+                    window.appealInProgress = false;
                     showToast("复议通过", "success"); mask.classList.remove('show'); setTimeout(() => mask.remove(), 300);
                     tryPlayVideo();
                 } else {
+                    window.appealInProgress = false;
                     showToast("驳回：" + (appealResult.split('|')[1] || "理由牵强"), "error");
                     btn.innerText = "重新提交"; btn.disabled = false; input.disabled = false;
                 }
-            } catch (e) { logError("申诉流程异常", e); showToast("网络异常，申诉未完成", "error"); btn.innerText = "提交"; btn.disabled = false; input.disabled = false; }
+            } catch (e) { window.appealInProgress = false; logError("申诉流程异常", e); showToast("网络异常，申诉未完成", "error"); btn.innerText = "提交"; btn.disabled = false; input.disabled = false; }
         };
     };
 
@@ -919,6 +978,7 @@ ${getApiConfigFieldsHtml(currentApi, 'm3-api-cfg')}
     const resetRuntimeForNavigation = () => {
         currentProcessId++;
         scheduledVideoId = null;
+        window.appealInProgress = false;
         const existingMask = document.getElementById('ai-focus-mask'); if (existingMask) existingMask.remove();
         if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
         if (window.musicTimer) { clearTimeout(window.musicTimer); window.musicTimer = null; }

@@ -70,12 +70,38 @@ flowchart TD
 
 ### 3.3 AI 提示词与结果解析
 
-AI 分类相关的核心是两段提示词：
+AI 分类相关的核心是两套提示词，分别对应初审和复审：
+
+**初审**
 
 - `VIDEO_REVIEW_SYSTEM_PROMPT`：定义分类标准、优先级和输出格式
 - `createVideoReviewPrompt()`：拼接当前视频的标题、简介和标签
 
-结果解析链路：
+初审模型输出要求是单个 JSON 对象，例如：
+
+```json
+{"category":"LEARNING-CS","confidence":0.86,"reason":"一句中文理由"}
+```
+
+**复审（申诉）**
+
+- `createAppealReviewPrompt(allowedCategories)`：动态生成复审系统提示词，接收用户在设置中配置的允许放行分类列表，并将其格式化注入提示词，使复审官了解哪些分类可直接批准
+- `appealVideoWithAI()`：构建复审请求时，在用户消息中额外注入 AI 初审的分类和理由，供复审官参考
+
+复审用户消息格式：
+
+```
+视频标题：xxx
+简介：xxx
+标签：xxx
+AI 初审分类：GAME-ENTERTAINMENT（游戏娱乐），初审理由：xxx
+
+用户申诉理由：xxx
+```
+
+复审模型输出格式：批准 `APPROVED`，驳回 `REJECTED|一句中文理由`。
+
+**结果解析链路（初审）**
 
 - `extractJsonObject()`：提取 JSON 片段
 - `parseVideoReviewResult()`：解析 AI 输出，兼容旧格式
@@ -150,9 +176,9 @@ AI 请求封装分三层：
 
 对应函数：
 
-- `checkVideoWithAI()`：初审
-- `appealVideoWithAI()`：复审
-- `showBlocker()`：拦截页与申诉入口
+- `checkVideoWithAI()`：初审，调用 AI 对视频进行首次分类
+- `appealVideoWithAI(title, desc, tags, reason, initialReview, allowedCategories)`：复审，接收用户申诉理由、AI 初审结果和用户设置的允许分类，调用 AI 进行二次裁决
+- `showBlocker()`：拦截页与申诉入口，展示初审结果和提供申诉通道
 
 ### 3.9 主流程与路由监听
 
@@ -228,7 +254,8 @@ AI 请求封装分三层：
 - `CATEGORY_OPTIONS`
 - `VALID_CATEGORIES`
 - `CATEGORY_ALIAS_MAP`
-- `VIDEO_REVIEW_SYSTEM_PROMPT`
+- `VIDEO_REVIEW_SYSTEM_PROMPT`（初审系统提示词）
+- `createAppealReviewPrompt()`（复审系统提示词生成函数）
 
 ### 6.2 修改页面选择器时
 
