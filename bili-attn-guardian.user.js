@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.3.9
+// @version      1.3.10
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini Pro and ChatGPT and Claude Code)
 // @match        *://*.bilibili.com/video/*
@@ -666,63 +666,65 @@ ${getApiConfigFieldsHtml(currentApi, 'm3-api-cfg')}
     };
 
     const createAppealReviewPrompt = (allowedCategories) => {
-        const allowedList = (allowedCategories || []).map(v => `- ${v}（${CATEGORY_MAP[v] || v}）`).join('\n') || '- 无';
-        return `你是一名社交媒体申诉复审官。用户正在使用一款注意力保护插件，因为视频命中需要拦截的分类而被拦截。TA现在提出申诉，你需要根据视频信息、AI 初审结果和用户申诉理由，判断是否批准放行。
+        const categoryList = CATEGORY_OPTIONS.map((opt, i) =>
+            `${i + 1}. ${opt.value}（${opt.label}）：${opt.description}`
+        ).join('\n');
+        const allowedList = (allowedCategories || []).map(v => `${v}（${CATEGORY_MAP[v] || v}）`).join('、') || '无';
+        return `你是一名社交媒体申诉复审官。用户正在使用注意力保护插件，视频因分类命中拦截规则而被屏蔽。你需要：
+1. 根据视频信息重新判断分类（可与初审不同）；
+2. 根据用户申诉理由，给出通行建议（APPROVED 或 REJECTED）。
 
-你的任务可以是重新判断视频分类，也可以是评估用户理由是否充分、真实，足以支撑此次观看的必要性。
+分类定义：
+${categoryList}
 
-以下是初审使用的分类定义，供你理解视频被拦截的背景：
+用户已批准放行的分类：${allowedList}
+（若视频实际属于上述分类，通行建议可为 APPROVED，无需苛求理由）
 
-1. LEARNING-COMMON：通用学习类。课程、讲座、系统知识体系讲解、备考、语言、数学、物理、化学、生物、历史、哲学、经济、人文社科、自然科学等。不含编程/计算机/软件/AI；不含泛娱乐科普、新闻或碎片谈资。
-
-2. LEARNING-CS：计算机科学与软件开发学习类。编程教程、游戏开发教程、算法、操作系统、网络、数据库、AI/ML 工程、项目实战。必须有明确教学或实操价值；不含快报、产品发布、行业新闻。
-
-3. LIFE-PRACTICAL：生活实用类。收纳、烹饪、理财、家务技巧、证件办理、生活经验等可直接提升生活效率的内容。
-
-4. GAME-GUIDE：游戏干货类。攻略、机制分析、版本更新解析、红石/建筑教程、配装、技巧、数据分析等有明确信息价值的游戏内容。
-
-5. GAME-ENTERTAINMENT：游戏娱乐类。实况、主播切片、玩梗、整活、搞笑剪辑、挑战、Reaction、二创等以娱乐为主要目的的游戏内容。
-
-6. TECH-NEWS：科技资讯类。科技新闻、AI 快报、产品发布、硬件资讯、行业动态、工具推荐、泛泛评测等。
-
-7. MUSIC：音乐放松类。音乐、MV、翻唱、演奏、音乐会、歌单、白噪音等以聆听和放松为目的的内容。
-
-8. LOW_VALUE：低价值注意力劫持类。标题党、爽文解说、MEME、地缘政治、争议新闻、吃瓜、情绪煽动、营销号等以消耗注意力为目的的内容。
-
-9. UNKNOWN：信息不足或难以判断。
-
-以下是用户插件设置中已批准放行的分类（若复审后认定视频实际属于这些分类之一，可直接批准，无需苛求理由）：
-${allowedList}
-
-申诉审核标准：
-
-批准条件（须同时满足）：
-- 用户理由具体，能与视频内容直接关联。
-- 用户说明了当前观看此视频的真实必要性（如学习需要、任务要求、参考资料等）。
+通行建议为 APPROVED 的条件（须同时满足）：
+- 用户理由具体，能与视频内容直接关联；
+- 说明了当前观看的真实必要性（学习需要、任务要求、参考资料等）；
 - 理由可信，非刻意规避拦截的套话。
 
-驳回条件（满足任一即驳回）：
-- 理由含糊，例如"我就是想看"、"这个有用"、"无聊"。
-- 理由与视频内容无关。
-- 理由是无意义字符、数字或重复内容。
+通行建议为 REJECTED 的条件（满足任一即驳回）：
+- 理由含糊，如"我就是想看"、"无聊"；
+- 理由与视频内容无关；
+- 理由是无意义字符、数字或重复内容；
 - 用户仅复述视频标题或分类，未说明必要性。
-- 理由过于主观，不足以证明当前观看的合理性。
 
-输出格式：
-- 批准：APPROVED
-- 驳回：REJECTED|一句中文驳回理由
+输出格式（严格遵守，不得输出任何其他内容）：
+- 建议放行：CATEGORY|APPROVED
+- 建议驳回：CATEGORY|REJECTED|一句中文驳回理由
 
-不要输出其他内容。`;
+CATEGORY 必须是上方分类定义中的 value（如 LEARNING-CS、LOW_VALUE）。`;
+    };
+
+    // 解析复审结果：格式 CATEGORY|APPROVED 或 CATEGORY|REJECTED|理由，其余一律驳回
+    const parseAppealResult = (raw) => {
+        const text = String(raw || '').trim();
+        const parts = text.split('|');
+        const category = normalizeCategory(parts[0]);
+        if (category && parts.length >= 2) {
+            const verdict = parts[1].trim().toUpperCase();
+            if (verdict === 'APPROVED') return { category, approved: true, reason: null };
+            if (verdict === 'REJECTED') return { category, approved: false, reason: (parts[2] || '理由牵强').trim() };
+        }
+        logWarn('复审结果格式非预期，已按驳回处理。原始内容:', text);
+        return { category: null, approved: false, reason: `AI 返回格式异常，已按保守策略驳回（原始：${text.slice(0, 80)}）` };
     };
 
     const appealVideoWithAI = async (title, desc, tags, reason, initialReview, allowedCategories, retryCount = 1) => {
         const review = normalizeReviewResult(initialReview);
         const initialInfo = review ? `\nAI 初审分类：${review.category}（${CATEGORY_MAP[review.category] || review.category}），初审理由：${review.reason || '无'}` : '';
         const prompt = `视频标题：${title || '(空)'}\n简介：${desc || '(空)'}\n标签：${tags || '(空)'}${initialInfo}\n\n用户申诉理由：${reason}`;
-        return requestChatCompletion([
+        logInfo('▶ 复审请求发送中...');
+        logInfo(`  申诉理由：${reason}`);
+        logInfo(`  初审结论：${review ? `${review.category} (${formatConfidence(review.confidence)})` : '无'}`);
+        const raw = await requestChatCompletion([
             { role: "system", content: createAppealReviewPrompt(allowedCategories) },
             { role: "user", content: prompt }
         ], "AI 复审", retryCount);
+        logInfo('◀ 复审 API 原始返回:', raw);
+        return raw;
     };
 
     // ==========================================
@@ -826,11 +828,17 @@ ${allowedList}
         document.getElementById('m3-appeal-submit').onclick = async () => {
             const btn = document.getElementById('m3-appeal-submit'); const input = document.getElementById('m3-appeal-reason');
             if (!input.value.trim()) return showToast("请输入理由。", "error");
+            logInfo('★ 用户提交申诉，等待复审结果...');
             window.appealInProgress = true;
             btn.innerText = "裁判中..."; btn.disabled = true; input.disabled = true;
             try {
-                const appealResult = await appealVideoWithAI(title, desc, tags, input.value.trim(), review, getAllowedCategories());
-                if (appealResult.toUpperCase().startsWith('APPROVED')) {
+                const rawResult = await appealVideoWithAI(title, desc, tags, input.value.trim(), review, getAllowedCategories());
+                const decision = parseAppealResult(rawResult);
+                const allowedCats = getAllowedCategories();
+                const categoryPass = decision.category && allowedCats.includes(decision.category);
+                logInfo(`★ 复审决定：分类=${decision.category || '未知'}，建议=${decision.approved ? 'APPROVED' : 'REJECTED'}，分类直通=${categoryPass}`);
+                if (categoryPass || decision.approved) {
+                    logInfo(`★ 申诉通过（${categoryPass ? '分类在放行列表' : 'AI建议放行'}），写入缓存并放行。`);
                     GM_setValue(`ai_focus_cache_${currentVideoId}`, serializeReviewResult(createReviewResult(APPROVED_BY_APPEAL, 1, '申诉已通过，允许观看。')));
                     if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
                     window.appealInProgress = false;
@@ -838,10 +846,16 @@ ${allowedList}
                     tryPlayVideo();
                 } else {
                     window.appealInProgress = false;
-                    showToast("驳回：" + (appealResult.split('|')[1] || "理由牵强"), "error");
+                    showToast("驳回：" + (decision.reason || "理由牵强"), "error");
                     btn.innerText = "重新提交"; btn.disabled = false; input.disabled = false;
                 }
-            } catch (e) { window.appealInProgress = false; logError("申诉流程异常", e); showToast("网络异常，申诉未完成", "error"); btn.innerText = "提交"; btn.disabled = false; input.disabled = false; }
+            } catch (e) {
+                // 网络或 API 异常：严禁自动放行，保持拦截状态
+                window.appealInProgress = false;
+                logError('★ 复审异常，保持拦截（不自动放行）', e);
+                showToast(`复审失败，视频保持拦截：${getErrorMessage(e)}`, "error");
+                btn.innerText = "重新提交"; btn.disabled = false; input.disabled = false;
+            }
         };
     };
 
@@ -944,15 +958,25 @@ ${allowedList}
 
             if (isVisaApproved) {
                 if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
+                if (window.guardInterval) { clearInterval(window.guardInterval); window.guardInterval = null; }
                 showToast(`允许通行`, "success");
                 const mask = document.getElementById('ai-focus-mask');
                 if (mask) { mask.classList.remove('show'); setTimeout(() => mask.remove(), 300); }
                 tryPlayVideo();
             } else {
-                if (!window.pauseInterval) { 
-                    window.pauseInterval = setInterval(forcePauseVideo, 100); 
+                if (!window.pauseInterval) {
+                    window.pauseInterval = setInterval(forcePauseVideo, 100);
                 }
                 showBlocker(review, title, desc, tags, currentVideoId);
+                if (window.guardInterval) clearInterval(window.guardInterval);
+                window.guardInterval = setInterval(() => {
+                    const m = document.getElementById('ai-focus-mask');
+                    if (!m || !m.classList.contains('show')) {
+                        logWarn('遮罩被外部移除，恢复拦截');
+                        if (!window.pauseInterval) window.pauseInterval = setInterval(forcePauseVideo, 100);
+                        showBlocker(review, title, desc, tags, currentVideoId);
+                    }
+                }, 60000);
             }
 
         } catch (error) {
@@ -982,6 +1006,7 @@ ${allowedList}
         const existingMask = document.getElementById('ai-focus-mask'); if (existingMask) existingMask.remove();
         if (window.pauseInterval) { clearInterval(window.pauseInterval); window.pauseInterval = null; }
         if (window.musicTimer) { clearTimeout(window.musicTimer); window.musicTimer = null; }
+        if (window.guardInterval) { clearInterval(window.guardInterval); window.guardInterval = null; }
     };
 
     const handleVideoRouteChange = () => {
