@@ -4,6 +4,8 @@
 // @version      1.3.11
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini Pro and ChatGPT and Claude Code)
+// @updateURL    https://raw.githubusercontent.com/xiaoluobo58/bili-attn-guardian/main/bili-attn-guardian.user.js
+// @downloadURL  https://raw.githubusercontent.com/xiaoluobo58/bili-attn-guardian/main/bili-attn-guardian.user.js
 // @match        *://*.bilibili.com/video/*
 // @homepageURL  https://www.milobo.moe
 // @grant        GM_xmlhttpRequest
