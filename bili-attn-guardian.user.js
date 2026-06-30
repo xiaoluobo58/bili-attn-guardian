@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩审判庭（Bilibili Attention Guardian）
 // @namespace    http://tampermonkey.net/
-// @version      1.3.10
+// @version      1.3.11
 // @description  抓取视频标题、简介和标签(TAG)通过AI判断。支持自定义放行分类，保护注意力。
 // @author       Misaka Milobo(By Gemini Pro and ChatGPT and Claude Code)
 // @match        *://*.bilibili.com/video/*
@@ -39,6 +39,7 @@
         { value: 'GAME-GUIDE', label: '游戏干货', description: '属于游戏类且偏干货的内容，如攻略、机制分析、版本快照、配装路线等，再例如 Minecraft 更新介绍' },
         { value: 'GAME-ENTERTAINMENT', label: '游戏娱乐', description: '属于游戏类且偏娱乐的内容，如游戏实况、玩梗、剪辑、整活、主播切片、搞笑合集等' },
         { value: 'TECH-NEWS', label: '科技资讯', description: '科技新闻、AI 快报、产品发布、行业动态等非教程内容' },
+        { value: 'DRAWING', label: '绘画创作', description: '绘画相关内容，如绘画教程、速绘过程、插画创作、原画设计、美术理论、数字绘画、手绘技巧、板绘演示等' },
         { value: 'MUSIC', label: '音乐放松', description: '音乐放松类内容，如音乐、MV、翻唱、演奏' },
         { value: 'LOW_VALUE', label: '低价值注意力劫持', description: '标题党、爽文解说、MEME、玩梗鬼畜视频、地缘政治、新闻、吃瓜等' },
         { value: 'UNKNOWN', label: '信息不足', description: '信息不足或难以可靠判断' }
@@ -63,7 +64,12 @@
         'TOXIC': 'LOW_VALUE',
         'LEARNING_COMMON': 'LEARNING-COMMON',
         'LEARNING_CS': 'LEARNING-CS',
-        'LOW-VALUE': 'LOW_VALUE'
+        'LOW-VALUE': 'LOW_VALUE',
+        'ART': 'DRAWING',
+        'ART-DRAWING': 'DRAWING',
+        'ART_DRAWING': 'DRAWING',
+        'PAINTING': 'DRAWING',
+        'ILLUSTRATION': 'DRAWING'
     };
     const normalizeCategory = (category) => {
         const rawCategory = String(category || '').trim().toUpperCase();
@@ -147,7 +153,7 @@
             }
         }
 
-        const match = rawContent.match(/LEARNING[-_]COMMON|LEARNING[-_]CS|LIFE[-_ ]PRACTICAL|GAME[-_]GUIDE|GAME[-_]ENTERTAINMENT|TECH[-_]NEWS|LOW[_-]VALUE|UNKNOWN|MUSIC|ACADEMIC|PRACTICAL|GAME_GUIDE|TECH_REVIEW|HIJACKING|TOXIC/i);
+        const match = rawContent.match(/LEARNING[-_]COMMON|LEARNING[-_]CS|LIFE[-_ ]PRACTICAL|GAME[-_]GUIDE|GAME[-_]ENTERTAINMENT|TECH[-_]NEWS|DRAWING|LOW[_-]VALUE|UNKNOWN|MUSIC|ACADEMIC|PRACTICAL|GAME_GUIDE|TECH_REVIEW|HIJACKING|TOXIC/i);
         if (match) return createReviewResult(match[0], 0.5, 'AI 返回了旧式分类结果，缺少详细理由。');
         return useUnknownFallback ? createReviewResult('UNKNOWN', 0, 'AI 未按预期 JSON 格式返回，已按信息不足处理。') : null;
     };
@@ -182,11 +188,13 @@
 
 6. TECH-NEWS：科技非学习类。包括科技新闻、AI 快报、产品发布、硬件/软件资讯、行业动态、公司新闻、发布会总结、趋势观察、工具推荐或泛泛评测。不等同于教程；如果核心是在教用户掌握原理或技能，应归入 LEARNING-CS。
 
-7. MUSIC：音乐放松类。包括音乐、MV、翻唱、演奏、音乐会、歌单、白噪音、环境音等以聆听和放松为目的的内容。
+7. DRAWING：绘画创作类。包括绘画教程、速绘过程展示、插画创作分享、原画设计讲解、美术理论课程、数字绘画演示、手绘技巧教学、板绘过程记录、角色设计、场景概念图等与绘画创作相关的内容。无论是教学性质还是创作过程展示，只要核心是绘画相关，都归入此类。
 
-8. LOW_VALUE：低价值注意力劫持类。包括标题党、爽文解说、短平快刺激、MEME 玩梗、地缘政治、争议新闻、吃瓜、情绪煽动、对立引战、猎奇、阴谋论、营销号、明显为了消耗注意力而设计的内容。若视频同时包含一点知识信息但主要依赖冲突、猎奇、愤怒或爽感吸引点击，归入此类。
+8. MUSIC：音乐放松类。包括音乐、MV、翻唱、演奏、音乐会、歌单、白噪音、环境音等以聆听和放松为目的的内容。
 
-9. UNKNOWN：信息不足或难以可靠判断。标题、简介和标签无法支持稳定判断时使用；不要为了凑分类而猜测。
+9. LOW_VALUE：低价值注意力劫持类。包括标题党、爽文解说、短平快刺激、MEME 玩梗、地缘政治、争议新闻、吃瓜、情绪煽动、对立引战、猎奇、阴谋论、营销号、明显为了消耗注意力而设计的内容。若视频同时包含一点知识信息但主要依赖冲突、猎奇、愤怒或爽感吸引点击，归入此类。
+
+10. UNKNOWN：信息不足或难以可靠判断。标题、简介和标签无法支持稳定判断时使用；不要为了凑分类而猜测。
 
 判断优先级：
 - 明确教程、课程、系统知识、可复用技能优先归入学习类。
